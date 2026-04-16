@@ -16,7 +16,7 @@ Required environment variables:
 import os
 import time
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 
 import ccxt
 import pandas as pd
@@ -172,7 +172,6 @@ def main() -> None:
     while True:
         try:
             # Heartbeat
-            from datetime import datetime, UTC
             now = datetime.now(UTC)
             if now - last_heartbeat >= timedelta(hours=HEARTBEAT_INTERVAL_HOURS):
                 send_telegram_message("✅ <b>System Active</b>")
