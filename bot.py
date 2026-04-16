@@ -165,8 +165,8 @@ def main() -> None:
     logger.info("BTC/USDT Signal Bot starting up.")
     send_telegram_message("🤖 <b>BTC/USDT Signal Bot started</b>")
 
-    exchange = ccxt.binanceus()
-    last_heartbeat: datetime = datetime.utcnow()  # first heartbeat fires after 24 h; startup message serves as immediate confirmation
+    exchange = ccxt.coinbase()
+    last_heartbeat: now = datetime.now(UTC)  # first heartbeat fires after 24 h; startup message serves as immediate confirmation
     last_signal: dict = {"buy": None, "sell": None}
 
     while True:
