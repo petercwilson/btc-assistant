@@ -3,8 +3,8 @@ BTC/USDT Signal Bot
 Monitors BTC/USDT price action and sends Telegram alerts for trading signals.
 
 Signals:
-  BUY  🟢 — Price > 200-period SMA AND RSI < 35
-  SELL 🔴 — RSI > 70
+  BUY  🟢 — Price > 200-period SMA AND RSI < 35 AND 24-hour volume increasing
+  SELL 🔴 — RSI > 70 AND 24-hour volume increasing
 
 A heartbeat "System Active" message is sent every 24 hours.
 
@@ -96,6 +96,10 @@ def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
     rs = avg_gain / avg_loss
     df["rsi"] = 100 - (100 / (1 + rs))
 
+    # 24-hour rolling volume sum (24 × 1-hour candles)
+    df["volume"] = df["volume"].astype(float)
+    df["volume_24h"] = df["volume"].rolling(window=24).sum()
+
     return df
 
 
@@ -115,35 +119,45 @@ def check_and_notify(
     Alerts for the same signal type are suppressed within ``SIGNAL_COOLDOWN_HOURS``.
     """
     latest = df.iloc[-1]
+    prev = df.iloc[-2]
     price: float = latest["close"]
     sma200: float = latest["sma200"]
     rsi: float = latest["rsi"]
+    volume_24h: float = latest["volume_24h"]
+    volume_24h_prev: float = prev["volume_24h"]
 
-    if pd.isna(sma200) or pd.isna(rsi):
+    if pd.isna(sma200) or pd.isna(rsi) or pd.isna(volume_24h) or pd.isna(volume_24h_prev):
         logger.warning("Not enough data to calculate indicators yet.")
         return
 
-    logger.info("Price: %.2f | SMA200: %.2f | RSI: %.2f", price, sma200, rsi)
+    volume_increasing: bool = volume_24h > volume_24h_prev
+
+    logger.info(
+        "Price: %.2f | SMA200: %.2f | RSI: %.2f | Volume24h: %.2f BTC | VolumeIncreasing: %s",
+        price, sma200, rsi, volume_24h, volume_increasing,
+    )
     now = datetime.utcnow()
     cooldown = timedelta(hours=SIGNAL_COOLDOWN_HOURS)
 
-    if price > sma200 and rsi < 35:
+    if price > sma200 and rsi < 35 and volume_increasing:
         if last_signal["buy"] is None or now - last_signal["buy"] >= cooldown:
             message = (
                 "🟢 <b>BUY SIGNAL</b>\n\n"
-                f"Price:   <b>${price:,.2f}</b>\n"
-                f"RSI:     <b>{rsi:.2f}</b>\n"
-                f"200 SMA: <b>${sma200:,.2f}</b>"
+                f"Price:    <b>${price:,.2f}</b>\n"
+                f"RSI:      <b>{rsi:.2f}</b>\n"
+                f"200 SMA:  <b>${sma200:,.2f}</b>\n"
+                f"Vol 24h:  <b>{volume_24h:,.2f} BTC</b> ↑"
             )
             send_telegram_message(message)
             last_signal["buy"] = now
 
-    elif rsi > 70:
+    elif rsi > 70 and volume_increasing:
         if last_signal["sell"] is None or now - last_signal["sell"] >= cooldown:
             message = (
                 "🔴 <b>SELL SIGNAL</b>\n\n"
-                f"Price: <b>${price:,.2f}</b>\n"
-                f"RSI:   <b>{rsi:.2f}</b>"
+                f"Price:   <b>${price:,.2f}</b>\n"
+                f"RSI:     <b>{rsi:.2f}</b>\n"
+                f"Vol 24h: <b>{volume_24h:,.2f} BTC</b> ↑"
             )
             send_telegram_message(message)
             last_signal["sell"] = now
