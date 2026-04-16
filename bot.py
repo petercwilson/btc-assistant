@@ -1,6 +1,6 @@
 """
-BTC/USDT Signal Bot
-Monitors BTC/USDT price action and sends Telegram alerts for trading signals.
+BTC/USD Signal Bot
+Monitors BTC/USD price action and sends Telegram alerts for trading signals.
 
 Signals:
   BUY  🟢 — Price > 200-period SMA AND RSI < 35
@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 TELEGRAM_BOT_TOKEN: str = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID: str = os.environ.get("TELEGRAM_CHAT_ID", "")
 
-SYMBOL = "BTC/USDT"
+SYMBOL = "BTC/USD"
 TIMEFRAME = "1h"
 SMA_PERIOD = 200
 RSI_PERIOD = 14
@@ -67,7 +67,7 @@ def send_telegram_message(text: str) -> None:
 
 
 def fetch_ohlcv(exchange: ccxt.Exchange) -> pd.DataFrame:
-    """Fetch recent OHLCV candles for BTC/USDT from Binance (read-only)."""
+    """Fetch recent OHLCV candles for BTC/USD from Coinbase (read-only)."""
     limit = SMA_PERIOD + RSI_PERIOD + 10  # enough candles for both indicators
     raw = exchange.fetch_ohlcv(SYMBOL, timeframe=TIMEFRAME, limit=limit)
     df = pd.DataFrame(raw, columns=["timestamp", "open", "high", "low", "close", "volume"])
@@ -124,7 +124,7 @@ def check_and_notify(
         return
 
     logger.info("Price: %.2f | SMA200: %.2f | RSI: %.2f", price, sma200, rsi)
-    now = datetime.utcnow()
+    now = datetime.now(datetime.UTC)
     cooldown = timedelta(hours=SIGNAL_COOLDOWN_HOURS)
 
     if price > sma200 and rsi < 35:
@@ -162,17 +162,17 @@ def main() -> None:
             "See README.md for setup instructions."
         )
 
-    logger.info("BTC/USDT Signal Bot starting up.")
-    send_telegram_message("🤖 <b>BTC/USDT Signal Bot started</b>")
+    logger.info("BTC/USD Signal Bot starting up.")
+    send_telegram_message("🤖 <b>BTC/USD Signal Bot started</b>")
 
-    exchange = ccxt.binance()
-    last_heartbeat: datetime = datetime.utcnow()  # first heartbeat fires after 24 h; startup message serves as immediate confirmation
+    exchange = ccxt.coinbaseadvanced()
+    last_heartbeat: datetime = datetime.now(datetime.UTC)  # first heartbeat fires after 24 h; startup message serves as immediate confirmation
     last_signal: dict = {"buy": None, "sell": None}
 
     while True:
         try:
             # Heartbeat
-            now = datetime.utcnow()
+            now = datetime.now(datetime.UTC)
             if now - last_heartbeat >= timedelta(hours=HEARTBEAT_INTERVAL_HOURS):
                 send_telegram_message("✅ <b>System Active</b>")
                 last_heartbeat = now
