@@ -172,7 +172,8 @@ def main() -> None:
     while True:
         try:
             # Heartbeat
-            now = datetime.utcnow()
+            from datetime import datetime, UTC
+            now = datetime.now(UTC)
             if now - last_heartbeat >= timedelta(hours=HEARTBEAT_INTERVAL_HOURS):
                 send_telegram_message("✅ <b>System Active</b>")
                 last_heartbeat = now
