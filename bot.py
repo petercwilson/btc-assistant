@@ -124,7 +124,7 @@ def check_and_notify(
         return
 
     logger.info("Price: %.2f | SMA200: %.2f | RSI: %.2f", price, sma200, rsi)
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     cooldown = timedelta(hours=SIGNAL_COOLDOWN_HOURS)
 
     if price > sma200 and rsi < 35:
