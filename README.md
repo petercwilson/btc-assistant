@@ -74,22 +74,9 @@ pip install -r requirements.txt
 
 ### 5 — Run the bot
 
+The bot loads `.env` automatically at startup via `python-dotenv`, so no manual `export` step is needed:
+
 ```bash
-# Load env vars from .env (bash)
-export $(grep -v '^#' .env | xargs)
-
-python bot.py
-```
-
-Or on Windows (PowerShell):
-
-```powershell
-Get-Content .env | ForEach-Object {
-    if ($_ -notmatch '^#' -and $_ -ne '') {
-        $parts = $_ -split '=', 2
-        [System.Environment]::SetEnvironmentVariable($parts[0], $parts[1], 'Process')
-    }
-}
 python bot.py
 ```
 

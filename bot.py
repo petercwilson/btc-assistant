@@ -1,6 +1,6 @@
 """
 BTC/USDT Signal Bot
-Monitors BTC/USDT price action and sends Telegram alerts for trading signals.
+Monitors BTC/USDT price action on Binance and sends Telegram alerts for trading signals.
 
 Signals:
   BUY  🟢 — Price > 200-period SMA AND RSI < 35
@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, UTC
 import ccxt
 import pandas as pd
 import requests
+from dotenv import load_dotenv
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,16 +33,15 @@ logger = logging.getLogger(__name__)
 # Configuration (loaded from environment variables)
 # ---------------------------------------------------------------------------
 
-TELEGRAM_BOT_TOKEN: str = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID: str = os.environ.get("TELEGRAM_CHAT_ID", "")
-
 SYMBOL = "BTC/USDT"
 TIMEFRAME = "1h"
 SMA_PERIOD = 200
 RSI_PERIOD = 14
 POLL_INTERVAL_SECONDS = 60
 HEARTBEAT_INTERVAL_HOURS = 24
-SIGNAL_COOLDOWN_HOURS = 4  # minimum gap between repeated alerts for the same signal type
+SIGNAL_COOLDOWN_HOURS = 4   # minimum gap between repeated alerts for the same signal type
+TELEGRAM_MAX_RETRIES = 3    # number of attempts before giving up on a Telegram send
+RSI_EPSILON = 1e-10         # minimum avg_loss to avoid division by zero in RSI calculation
 
 # ---------------------------------------------------------------------------
 # Telegram helpers
@@ -49,16 +49,54 @@ SIGNAL_COOLDOWN_HOURS = 4  # minimum gap between repeated alerts for the same si
 
 
 def send_telegram_message(text: str) -> None:
-    """Send a message to the configured Telegram chat."""
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    """Send a message to the configured Telegram chat.
+
+    Credentials are read from the environment at call time so that changes made
+    after module import (e.g. in tests) are always picked up.
+
+    Retries up to ``TELEGRAM_MAX_RETRIES`` times with exponential back-off on
+    transient network errors.  Application-level errors returned by the
+    Telegram API (HTTP 200 with ``"ok": false``) are raised immediately without
+    retrying, as they indicate a configuration problem rather than a transient
+    failure.
+    """
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
     payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
+        "chat_id": chat_id,
         "text": text,
         "parse_mode": "HTML",
     }
-    response = requests.post(url, json=payload, timeout=10)
-    response.raise_for_status()
-    logger.info("Telegram message sent: %s", text.splitlines()[0])
+
+    for attempt in range(1, TELEGRAM_MAX_RETRIES + 1):
+        try:
+            response = requests.post(url, json=payload, timeout=10)
+            # Raise on HTTP 4xx/5xx, but strip the request URL from the
+            # exception so the bot token is never written to logs.
+            try:
+                response.raise_for_status()
+            except requests.exceptions.HTTPError:
+                raise requests.exceptions.HTTPError(
+                    f"Telegram API HTTP error {response.status_code}: {response.text}"
+                ) from None
+            # The Telegram API can return HTTP 200 with {"ok": false} for
+            # application-level errors (e.g. bad chat ID).
+            data = response.json()
+            if not data.get("ok"):
+                raise RuntimeError(f"Telegram API error: {data.get('description')}")
+            logger.info("Telegram message sent: %s", text.splitlines()[0])
+            return
+        except requests.exceptions.RequestException as exc:
+            if attempt < TELEGRAM_MAX_RETRIES:
+                wait = min(2 ** (attempt - 1), 60)
+                logger.warning(
+                    "Telegram send attempt %d/%d failed (%s); retrying in %ds",
+                    attempt, TELEGRAM_MAX_RETRIES, exc, wait,
+                )
+                time.sleep(wait)
+            else:
+                raise
 
 
 # ---------------------------------------------------------------------------
@@ -93,7 +131,9 @@ def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
     loss = -delta.clip(upper=0)
     avg_gain = gain.ewm(com=RSI_PERIOD - 1, min_periods=RSI_PERIOD).mean()
     avg_loss = loss.ewm(com=RSI_PERIOD - 1, min_periods=RSI_PERIOD).mean()
-    rs = avg_gain / avg_loss
+    # Guard against division by zero: when avg_loss is 0 (all gains), replace it
+    # with RSI_EPSILON so rs becomes very large and RSI converges to 100.
+    rs = avg_gain / avg_loss.replace(0, RSI_EPSILON)
     df["rsi"] = 100 - (100 / (1 + rs))
 
     return df
@@ -106,7 +146,7 @@ def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
 def check_and_notify(
     df: pd.DataFrame,
-    last_signal: dict,
+    last_signal: dict[str, datetime | None],
 ) -> None:
     """Evaluate the latest candle and send a Telegram alert if a signal fires.
 
@@ -138,6 +178,9 @@ def check_and_notify(
             send_telegram_message(message)
             last_signal["buy"] = now
 
+    # The SELL signal deliberately omits a trend filter: RSI overbought
+    # conditions are actionable regardless of whether price is above or below
+    # the 200 SMA, since extreme readings in either trend direction carry risk.
     elif rsi > 70:
         if last_signal["sell"] is None or now - last_signal["sell"] >= cooldown:
             message = (
@@ -155,6 +198,8 @@ def check_and_notify(
 
 
 def main() -> None:
+    load_dotenv()  # load .env file if present (no-op when env vars are already set)
+
     missing = [v for v in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID") if not os.environ.get(v)]
     if missing:
         raise EnvironmentError(
@@ -165,9 +210,9 @@ def main() -> None:
     logger.info("BTC/USDT Signal Bot starting up.")
     send_telegram_message("🤖 <b>BTC/USDT Signal Bot started</b>")
 
-    exchange = ccxt.coinbase()
+    exchange = ccxt.binance()
     last_heartbeat = datetime.now(UTC)  # first heartbeat fires after 24 h; startup message serves as immediate confirmation
-    last_signal: dict = {"buy": None, "sell": None}
+    last_signal: dict[str, datetime | None] = {"buy": None, "sell": None}
 
     while True:
         try:
@@ -191,6 +236,8 @@ def main() -> None:
         except Exception as exc:  # noqa: BLE001
             logger.error("Unexpected error: %s", exc)
 
+        # Sleep outside the try/except so the bot always waits between
+        # iterations regardless of errors, avoiding tight retry loops.
         time.sleep(POLL_INTERVAL_SECONDS)
 
 
