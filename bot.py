@@ -1,5 +1,4 @@
 """
-<<<<<<< HEAD
 Signal Bot — multi-symbol, multi-indicator Telegram alert bot.
 
 Monitors one or more trading pairs on a configurable exchange and sends
@@ -16,18 +15,6 @@ Signals:
   MOVE      ⚡ — Price moves > PRICE_MOVE_PCT_THRESHOLD% in one candle
   ATH       🏔  — Price within ATH_PROXIMITY_PCT% of its rolling ATH
   PRICE ↑/↓ 🎯 — One-time alert when price crosses PRICE_ALERT_HIGH/LOW
-=======
-SOL Signal Bot (with env-configurable pairs)
-Monitors configured trading pairs and sends Telegram alerts for trading signals.
-
-Signals:
-    BUY  🟢 — Price > SMA AND RSI below buy threshold
-    SELL 🔴 — RSI above sell threshold
-
-Defaults:
-    Pair: SOL/USDT
-    Rules: SMA 200, RSI period 14, buy RSI < 35, sell RSI > 70
->>>>>>> d376fc3 (added new features)
 
 All BUY/SELL signals include a strength score (1–5 ⭐).
 Volume spikes (🔥) are flagged when volume exceeds
@@ -81,14 +68,8 @@ Optional environment variables (all have sensible defaults):
   DB_PATH                  — SQLite history database path (default: signals.db)
 """
 
-<<<<<<< HEAD
 # Standard library
 import json
-=======
-import os
-import json
-import time
->>>>>>> d376fc3 (added new features)
 import logging
 import os
 import signal as _signal_module
@@ -322,13 +303,6 @@ def log_signal(
     except sqlite3.Error as exc:
         logger.warning("DB write failed: %s", exc)
 
-<<<<<<< HEAD
-=======
-TIMEFRAME = "1h"
-POLL_INTERVAL_SECONDS = 60
-HEARTBEAT_INTERVAL_HOURS = 24
-SIGNAL_COOLDOWN_HOURS = 4  # minimum gap between repeated alerts for the same signal type
->>>>>>> d376fc3 (added new features)
 
 DEFAULT_SYMBOLS = ("SOL/USDT",)
 DEFAULT_RULES = {
@@ -553,7 +527,6 @@ def _make_snooze_keyboard(symbol: str, signal_type: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-<<<<<<< HEAD
 def _required_limit() -> int:
     """Number of candles needed to compute every indicator with full warmup."""
     return (
@@ -583,12 +556,6 @@ def fetch_ohlcv(
     tf = timeframe or TIMEFRAME
     lim = limit or _required_limit()
     raw = exchange.fetch_ohlcv(symbol, timeframe=tf, limit=lim)
-=======
-def fetch_ohlcv(exchange: ccxt.Exchange, symbol: str, sma_period: int, rsi_period: int) -> pd.DataFrame:
-    """Fetch recent OHLCV candles for a symbol from the configured exchange (read-only)."""
-    limit = sma_period + rsi_period + 10  # enough candles for both indicators
-    raw = exchange.fetch_ohlcv(symbol, timeframe=TIMEFRAME, limit=limit)
->>>>>>> d376fc3 (added new features)
     df = pd.DataFrame(raw, columns=["timestamp", "open", "high", "low", "close", "volume"])
     for col in ("open", "high", "low", "close", "volume"):
         df[col] = df[col].astype(float)
@@ -600,7 +567,6 @@ def fetch_ohlcv(exchange: ccxt.Exchange, symbol: str, sma_period: int, rsi_perio
 # ---------------------------------------------------------------------------
 
 
-<<<<<<< HEAD
 def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """Compute all technical indicators and return an enriched DataFrame.
 
@@ -629,22 +595,6 @@ def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
     avg_loss = loss.ewm(com=RSI_PERIOD - 1, min_periods=RSI_PERIOD).mean()
     # Guard against division by zero: when avg_loss is 0 (all gains), RSI → 100.
     rs = avg_gain / avg_loss.replace(0, RSI_EPSILON)
-=======
-def calculate_indicators(df: pd.DataFrame, sma_period: int, rsi_period: int) -> pd.DataFrame:
-    """Add SMA and RSI columns to the OHLCV DataFrame."""
-    df = df.copy()
-
-    # Configurable Simple Moving Average
-    df["sma"] = df["close"].rolling(window=sma_period).mean()
-
-    # Configurable RSI period (Wilder / EMA smoothing via pandas ewm)
-    delta = df["close"].diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    avg_gain = gain.ewm(com=rsi_period - 1, min_periods=rsi_period).mean()
-    avg_loss = loss.ewm(com=rsi_period - 1, min_periods=rsi_period).mean()
-    rs = avg_gain / avg_loss
->>>>>>> d376fc3 (added new features)
     df["rsi"] = 100 - (100 / (1 + rs))
 
     # MACD
@@ -837,27 +787,13 @@ def check_and_notify(
     exchange: ccxt.Exchange,
     symbol: str,
     df: pd.DataFrame,
-<<<<<<< HEAD
     state: dict,
 ) -> None:
     """Evaluate all signal types for *symbol* and send Telegram alerts as needed."""
-=======
-    last_signal_for_symbol: dict,
-    symbol: str,
-    rules: dict[str, float | int],
-) -> None:
-    """Evaluate the latest candle and send a Telegram alert if a signal fires.
-
-    ``last_signal_for_symbol`` is a mutable dict with keys ``"buy"`` and ``"sell"`` mapping
-    to the ``datetime`` of the most recent alert of each type (or ``None``).
-    Alerts for the same signal type are suppressed within ``SIGNAL_COOLDOWN_HOURS``.
-    """
->>>>>>> d376fc3 (added new features)
     latest = df.iloc[-1]
     price: float = latest["close"]
     sma: float = latest["sma"]
     rsi: float = latest["rsi"]
-<<<<<<< HEAD
     volume_spike = _is_volume_spike(latest)
     vol_tag = "🔥 <i>Volume spike</i>\n" if volume_spike else ""
 
@@ -904,50 +840,11 @@ def check_and_notify(
             stars = "⭐" * strength
             message = (
                 f"🔴 <b>SELL SIGNAL — {symbol}</b>\n\n"
-=======
-    sma_period: int = int(rules["sma_period"])
-    buy_rsi_max: float = float(rules["buy_rsi_max"])
-    sell_rsi_min: float = float(rules["sell_rsi_min"])
-
-    if pd.isna(sma) or pd.isna(rsi):
-        logger.warning("Not enough data to calculate indicators yet.")
-        return
-
-    logger.info(
-        "%s | Price: %.2f | SMA(%d): %.2f | RSI: %.2f",
-        symbol,
-        price,
-        sma_period,
-        sma,
-        rsi,
-    )
-    now = datetime.now(UTC)
-    cooldown = timedelta(hours=SIGNAL_COOLDOWN_HOURS)
-
-    if price > sma and rsi < buy_rsi_max:
-        if last_signal_for_symbol["buy"] is None or now - last_signal_for_symbol["buy"] >= cooldown:
-            message = (
-                "🟢 <b>BUY SIGNAL</b>\n\n"
-                f"Symbol:  <b>{symbol}</b>\n"
-                f"Price:   <b>${price:,.2f}</b>\n"
-                f"RSI:     <b>{rsi:.2f}</b>\n"
-                f"SMA({sma_period}): <b>${sma:,.2f}</b>"
-            )
-            send_telegram_message(message)
-            last_signal_for_symbol["buy"] = now
-
-    elif rsi > sell_rsi_min:
-        if last_signal_for_symbol["sell"] is None or now - last_signal_for_symbol["sell"] >= cooldown:
-            message = (
-                "🔴 <b>SELL SIGNAL</b>\n\n"
-                f"Symbol: <b>{symbol}</b>\n"
->>>>>>> d376fc3 (added new features)
                 f"Price: <b>${price:,.2f}</b>\n"
                 f"RSI:   <b>{rsi:.2f}</b>\n"
                 f"{vol_tag}"
                 f"Strength: {stars} ({strength}/5)"
             )
-<<<<<<< HEAD
             send_telegram_message(message, reply_markup=_make_snooze_keyboard(symbol, "sell"))
             _record_signal(state, "sell", symbol, price, rsi)
 
@@ -1297,10 +1194,6 @@ def _make_symbol_state() -> dict:
         "price_alert_high_fired": False,
         "price_alert_low_fired": False,
     }
-=======
-            send_telegram_message(message)
-            last_signal_for_symbol["sell"] = now
->>>>>>> d376fc3 (added new features)
 
 
 # ---------------------------------------------------------------------------
@@ -1319,29 +1212,14 @@ def main() -> None:
             "See README.md for setup instructions."
         )
 
-<<<<<<< HEAD
     init_db()
 
     if PROMETHEUS_PORT > 0:
         _init_prometheus()
-=======
-    symbols = parse_symbols_from_env()
-    rules_by_symbol = load_symbol_rules(symbols)
-
-    logger.info("Signal Bot starting up for: %s", ", ".join(symbols))
-    send_telegram_message(f"🤖 <b>Signal Bot started</b>\nPairs: <b>{', '.join(symbols)}</b>")
-    send_telegram_message(build_thresholds_message(rules_by_symbol))
-
-    exchange = ccxt.coinbase()
-    last_heartbeat = datetime.now(UTC)  # first heartbeat fires after 24 h; startup message serves as immediate confirmation
-    # Track cooldown state independently for each symbol.
-    last_signal_by_symbol: dict = {symbol: {"buy": None, "sell": None} for symbol in symbols}
->>>>>>> d376fc3 (added new features)
 
     # Register SIGTERM handler for graceful container shutdown
     _signal_module.signal(_signal_module.SIGTERM, _handle_sigterm)
 
-<<<<<<< HEAD
     if EXCHANGE_ID not in ccxt.exchanges:
         raise ValueError(
             f"Unknown exchange '{EXCHANGE_ID}'. "
@@ -1349,23 +1227,6 @@ def main() -> None:
         )
     exchange = getattr(ccxt, EXCHANGE_ID)()
     symbol_states = {sym: _make_symbol_state() for sym in SYMBOLS}
-=======
-            # Fetch data and check signals for each configured trading pair.
-            for symbol in symbols:
-                rules = rules_by_symbol[symbol]
-                df = fetch_ohlcv(
-                    exchange,
-                    symbol,
-                    sma_period=int(rules["sma_period"]),
-                    rsi_period=int(rules["rsi_period"]),
-                )
-                df = calculate_indicators(
-                    df,
-                    sma_period=int(rules["sma_period"]),
-                    rsi_period=int(rules["rsi_period"]),
-                )
-                check_and_notify(df, last_signal_by_symbol[symbol], symbol, rules)
->>>>>>> d376fc3 (added new features)
 
     # Start command handler in a daemon thread
     cmd_thread = threading.Thread(
