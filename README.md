@@ -1,16 +1,9 @@
-<<<<<<< HEAD
-# Signal Bot
+# BTC Assistant (Telegram)
 
-A lightweight Python signal bot that monitors one or more crypto trading pairs on a
-configurable exchange and sends **Telegram alerts** when key technical conditions are
-met. It is a **read-only** bot — it never places any orders.
-=======
-# SOL Signal Bot (Env-Configurable Pairs)
+A lightweight Python signal bot that monitors one or more crypto trading pairs on a configurable exchange and sends **Telegram alerts** when key technical conditions are met.
 
-A lightweight Python signal bot that monitors configured trading pairs on Binance and sends **Telegram alerts** when key technical conditions are met. It is a **read-only** bot — it never places any orders.
-
-By default, it runs in **SOL-only mode** (`SOL/USDT`). You can change pairs and per-symbol thresholds with environment variables.
->>>>>>> d376fc3 (added new features)
+- **Read-only**: it never places orders.
+- **No profiles**: it does not store user profiles.
 
 ---
 
@@ -29,13 +22,9 @@ By default, it runs in **SOL-only mode** (`SOL/USDT`). You can change pairs and 
 | 🏔 **ATH Proximity** | Price enters within `ATH_PROXIMITY_PCT`% of the rolling ATH |
 | 🎯 **Price Alert** | Price crosses `PRICE_ALERT_HIGH` or `PRICE_ALERT_LOW` (one-time) |
 
-<<<<<<< HEAD
-BUY and SELL signals include a **strength score (1–5 ⭐)** combining RSI distance from
-its threshold and price distance from the SMA. A **🔥 volume spike** tag is added when
-volume exceeds `VOLUME_SPIKE_MULTIPLIER` × its rolling mean.
+BUY and SELL signals include a **strength score (1–5 ⭐)** combining RSI distance from its threshold and price distance from the SMA. A **🔥 volume spike** tag is added when volume exceeds `VOLUME_SPIKE_MULTIPLIER` × its rolling mean.
 
-A ✅ **Daily Summary** is sent every `HEARTBEAT_INTERVAL_HOURS` hours with the current
-price, RSI, SMA distance, Bollinger Band width, and the signal counts for the period.
+A ✅ **Daily Summary** is sent every `HEARTBEAT_INTERVAL_HOURS` hours with the current price, RSI, SMA distance, Bollinger Band width, and the signal counts for the period.
 
 ---
 
@@ -49,25 +38,14 @@ Send these commands to your bot in the Telegram chat:
 | `/config` | Show the active configuration |
 | `/mute <hours>` | Suppress all alerts for the given number of hours |
 
-Signal messages also include **Snooze 1h / Snooze 4h** inline buttons to temporarily
-suppress that specific signal type.
-=======
-Each alert includes the current price, RSI value, and (for buy signals) the configured SMA.  
-A ✅ **System Active** heartbeat message is sent every 24 hours so you know the bot is still running.
->>>>>>> d376fc3 (added new features)
-
-Rules are configurable per symbol:
-- `sma_period`
-- `rsi_period`
-- `buy_rsi_max`
-- `sell_rsi_min`
+Signal messages also include **Snooze 1h / Snooze 4h** inline buttons to temporarily suppress that specific signal type.
 
 ---
 
 ## Requirements
 
 - Python 3.9+
-- A Telegram Bot token (free, from @BotFather)
+- A Telegram Bot token (from @BotFather)
 - Your Telegram Chat ID
 
 ---
@@ -78,30 +56,22 @@ Rules are configurable per symbol:
 
 1. Open Telegram and search for **@BotFather**.
 2. Start a chat and send `/newbot`.
-3. Follow the prompts — choose a name (e.g. `Signal Bot`) and a username (must end in `bot`).
+3. Follow the prompts — choose a name and a username (must end in `bot`).
 4. BotFather will reply with a token like:
    ```
    123456789:ABCdefGhIJKlmNoPQRsTUVwxYZ
    ```
-   Keep this secret — treat it like a password.
 
 ### 2 — Find your Telegram Chat ID
 
 1. Search for **@userinfobot** in Telegram.
-2. Start a chat with it (send `/start` or any message).
+2. Start a chat with it and send `/start`.
 3. It will reply with your numeric **Chat ID**, e.g. `987654321`.
 
-> Alternatively, send any message to your new bot, then open this URL in a browser
-> (replace `<TOKEN>` with your bot token):
-> ```
-> https://api.telegram.org/bot<TOKEN>/getUpdates
-> ```
-> Look for `"chat":{"id": ...}` in the JSON response.
+To broadcast signals to **multiple chats** (e.g. private chat + group), set `TELEGRAM_CHAT_ID` to a comma-separated list:
 
-To broadcast signals to **multiple chats** (e.g. a private chat and a group channel),
-set `TELEGRAM_CHAT_ID` to a comma-separated list:
 ```
-TELEGRAM_CHAT_ID=987654321,−100123456789
+TELEGRAM_CHAT_ID=987654321,-100123456789
 ```
 
 ### 3 — Configure environment variables
@@ -111,22 +81,6 @@ Copy `.env.example` to `.env` and fill in your values:
 ```bash
 cp .env.example .env
 ```
-
-```
-TELEGRAM_BOT_TOKEN=123456789:ABCdefGhIJKlmNoPQRsTUVwxYZ
-TELEGRAM_CHAT_ID=987654321
-TRADING_PAIRS=SOL/USDT
-SYMBOL_RULES_JSON={"SOL/USDT":{"sma_period":200,"rsi_period":14,"buy_rsi_max":35,"sell_rsi_min":70}}
-```
-
-Multi-pair example:
-
-```
-TRADING_PAIRS=SOL/USDT,BTC/USDT
-SYMBOL_RULES_JSON={"SOL/USDT":{"sma_period":150,"rsi_period":14,"buy_rsi_max":33,"sell_rsi_min":68},"BTC/USDT":{"sma_period":200,"rsi_period":14,"buy_rsi_max":35,"sell_rsi_min":72}}
-```
-
-> **Never commit your `.env` file.** It is already listed in `.gitignore`.
 
 ### 4 — Install dependencies
 
@@ -144,23 +98,15 @@ python bot.py
 
 The bot will:
 1. Send a startup message to your Telegram chat.
-<<<<<<< HEAD
 2. Check all configured symbols every `POLL_INTERVAL_SECONDS` seconds.
 3. Send signal alerts whenever conditions are met.
 4. Send a daily summary every `HEARTBEAT_INTERVAL_HOURS` hours.
 5. Send a "Bot stopped" message on clean shutdown (SIGTERM or Ctrl-C).
-=======
-2. Send a startup message showing active thresholds for each configured pair.
-3. Check each configured pair on the 1-hour chart every 60 seconds.
-4. Send a signal alert whenever conditions are met.
-5. Send a "System Active" heartbeat every 24 hours.
->>>>>>> d376fc3 (added new features)
 
 ---
 
 ## Docker
 
-<<<<<<< HEAD
 Build and run with Docker Compose (recommended for production):
 
 ```bash
@@ -170,18 +116,7 @@ docker compose up -d
 
 The SQLite history database is persisted in a named Docker volume (`bot_data`).
 
-To expose the Prometheus `/metrics` endpoint, uncomment the `ports` section in
-`docker-compose.yml` and set `PROMETHEUS_PORT=8000` in `.env`.
-=======
-| Variable | Description |
-|---|---|
-| `TELEGRAM_BOT_TOKEN` | Token from @BotFather |
-| `TELEGRAM_CHAT_ID` | Your numeric Telegram chat ID |
-| `TRADING_PAIRS` | Optional comma-separated pairs (default: `SOL/USDT`) |
-| `SYMBOL_RULES_JSON` | Optional JSON object with per-symbol rule overrides |
-
-If `SYMBOL_RULES_JSON` is set and a pair in `TRADING_PAIRS` is missing from it, the bot logs a warning and uses default rules for that pair.
->>>>>>> d376fc3 (added new features)
+To expose the Prometheus `/metrics` endpoint, uncomment the `ports` section in `docker-compose.yml` and set `PROMETHEUS_PORT=8000` in `.env`.
 
 ---
 
@@ -238,6 +173,4 @@ btc-assistant/
 
 ## Disclaimer
 
-This bot is for **informational purposes only** and does **not** constitute financial
-advice. It never executes trades on your behalf. Always do your own research before
-making investment decisions.
+This bot is for **informational purposes only** and does **not** constitute financial advice. It never executes trades on your behalf. Always do your own research before making investment decisions.
