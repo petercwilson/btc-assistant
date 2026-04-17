@@ -1,6 +1,8 @@
-# BTC/USDT Signal Bot
+# Signal Bot
 
-A lightweight Python signal bot that monitors BTC/USDT price action on Binance and sends **Telegram alerts** when key technical conditions are met. It is a **read-only** bot — it never places any orders.
+A lightweight Python signal bot that monitors one or more crypto trading pairs on a
+configurable exchange and sends **Telegram alerts** when key technical conditions are
+met. It is a **read-only** bot — it never places any orders.
 
 ---
 
@@ -8,11 +10,38 @@ A lightweight Python signal bot that monitors BTC/USDT price action on Binance a
 
 | Signal | Condition |
 |---|---|
-| 🟢 **BUY SIGNAL** | Price > SMA(`SMA_PERIOD`) **AND** RSI < `RSI_BUY_THRESHOLD` (default 35) |
-| 🔴 **SELL SIGNAL** | RSI > `RSI_SELL_THRESHOLD` (default 70) |
+| 🟢 **BUY** | Price > SMA(`SMA_PERIOD`) **AND** RSI < `RSI_BUY_THRESHOLD` |
+| 🔴 **SELL** | RSI > `RSI_SELL_THRESHOLD` (optionally AND price < SMA if `SELL_TREND_FILTER=true`) |
+| 📈 **MACD BUY** | MACD histogram flips from negative to positive (bullish crossover) |
+| 📉 **MACD SELL** | MACD histogram flips from positive to negative (bearish crossover) |
+| 📊 **BB Upper Break** | Price closes above the upper Bollinger Band |
+| 📊 **BB Lower Break** | Price closes below the lower Bollinger Band |
+| 🔀 **Divergence** | Bullish or bearish RSI/price divergence detected |
+| ⚡ **Large Move** | Single candle moves more than `PRICE_MOVE_PCT_THRESHOLD`% |
+| 🏔 **ATH Proximity** | Price enters within `ATH_PROXIMITY_PCT`% of the rolling ATH |
+| 🎯 **Price Alert** | Price crosses `PRICE_ALERT_HIGH` or `PRICE_ALERT_LOW` (one-time) |
 
-Each alert includes the current price, RSI value, and (for buy signals) the SMA.  
-A ✅ **Daily Summary** message is sent every `HEARTBEAT_INTERVAL_HOURS` hours (default 24h) with the current price, RSI, distance from the SMA, and the number of signals fired during that period.
+BUY and SELL signals include a **strength score (1–5 ⭐)** combining RSI distance from
+its threshold and price distance from the SMA. A **🔥 volume spike** tag is added when
+volume exceeds `VOLUME_SPIKE_MULTIPLIER` × its rolling mean.
+
+A ✅ **Daily Summary** is sent every `HEARTBEAT_INTERVAL_HOURS` hours with the current
+price, RSI, SMA distance, Bollinger Band width, and the signal counts for the period.
+
+---
+
+## Telegram Commands
+
+Send these commands to your bot in the Telegram chat:
+
+| Command | Description |
+|---|---|
+| `/status` | Current price, RSI, and SMA for all monitored symbols |
+| `/config` | Show the active configuration |
+| `/mute <hours>` | Suppress all alerts for the given number of hours |
+
+Signal messages also include **Snooze 1h / Snooze 4h** inline buttons to temporarily
+suppress that specific signal type.
 
 ---
 
@@ -30,8 +59,8 @@ A ✅ **Daily Summary** message is sent every `HEARTBEAT_INTERVAL_HOURS` hours (
 
 1. Open Telegram and search for **@BotFather**.
 2. Start a chat and send `/newbot`.
-3. Follow the prompts — choose a name (e.g. `BTC Signal Bot`) and a username (must end in `bot`, e.g. `btc_signal_bot`).
-4. BotFather will reply with a token that looks like:
+3. Follow the prompts — choose a name (e.g. `Signal Bot`) and a username (must end in `bot`).
+4. BotFather will reply with a token like:
    ```
    123456789:ABCdefGhIJKlmNoPQRsTUVwxYZ
    ```
@@ -43,11 +72,18 @@ A ✅ **Daily Summary** message is sent every `HEARTBEAT_INTERVAL_HOURS` hours (
 2. Start a chat with it (send `/start` or any message).
 3. It will reply with your numeric **Chat ID**, e.g. `987654321`.
 
-> Alternatively, send any message to your new bot, then open this URL in a browser (replace `<TOKEN>` with your bot token):
+> Alternatively, send any message to your new bot, then open this URL in a browser
+> (replace `<TOKEN>` with your bot token):
 > ```
 > https://api.telegram.org/bot<TOKEN>/getUpdates
 > ```
 > Look for `"chat":{"id": ...}` in the JSON response.
+
+To broadcast signals to **multiple chats** (e.g. a private chat and a group channel),
+set `TELEGRAM_CHAT_ID` to a comma-separated list:
+```
+TELEGRAM_CHAT_ID=987654321,−100123456789
+```
 
 ### 3 — Configure environment variables
 
@@ -74,44 +110,81 @@ pip install -r requirements.txt
 
 ### 5 — Run the bot
 
-The bot loads `.env` automatically at startup via `python-dotenv`, so no manual `export` step is needed:
-
 ```bash
 python bot.py
 ```
 
 The bot will:
 1. Send a startup message to your Telegram chat.
-2. Check the BTC/USDT 1-hour chart every 60 seconds.
-3. Send a signal alert whenever conditions are met.
-4. Send a "System Active" heartbeat every 24 hours.
+2. Check all configured symbols every `POLL_INTERVAL_SECONDS` seconds.
+3. Send signal alerts whenever conditions are met.
+4. Send a daily summary every `HEARTBEAT_INTERVAL_HOURS` hours.
+5. Send a "Bot stopped" message on clean shutdown (SIGTERM or Ctrl-C).
 
 ---
 
-## Configuration reference
+## Docker
+
+Build and run with Docker Compose (recommended for production):
+
+```bash
+cp .env.example .env   # fill in your credentials
+docker compose up -d
+```
+
+The SQLite history database is persisted in a named Docker volume (`bot_data`).
+
+To expose the Prometheus `/metrics` endpoint, uncomment the `ports` section in
+`docker-compose.yml` and set `PROMETHEUS_PORT=8000` in `.env`.
+
+---
+
+## Configuration Reference
 
 | Variable | Default | Description |
 |---|---|---|
 | `TELEGRAM_BOT_TOKEN` | *(required)* | Token from @BotFather |
-| `TELEGRAM_CHAT_ID` | *(required)* | Your numeric Telegram chat ID |
+| `TELEGRAM_CHAT_ID` | *(required)* | Comma-separated Telegram chat ID(s) |
+| `EXCHANGE` | `binance` | ccxt exchange ID (e.g. `kraken`, `coinbase`) |
+| `SYMBOLS` | `BTC/USDT` | Comma-separated trading pairs |
 | `TIMEFRAME` | `1h` | OHLCV candle size (e.g. `4h`, `1d`) |
+| `CONFIRM_TIMEFRAME` | *(disabled)* | Second timeframe for signal confirmation |
 | `SMA_PERIOD` | `200` | Simple Moving Average period |
 | `RSI_PERIOD` | `14` | RSI calculation period |
-| `RSI_BUY_THRESHOLD` | `35` | RSI below this value triggers a BUY signal |
-| `RSI_SELL_THRESHOLD` | `70` | RSI above this value triggers a SELL signal |
+| `RSI_BUY_THRESHOLD` | `35` | RSI below this triggers a BUY signal |
+| `RSI_SELL_THRESHOLD` | `70` | RSI above this triggers a SELL signal |
+| `SELL_TREND_FILTER` | `false` | Require price < SMA for SELL signals |
+| `MACD_FAST` | `12` | MACD fast EMA period |
+| `MACD_SLOW` | `26` | MACD slow EMA period |
+| `MACD_SIGNAL_PERIOD` | `9` | MACD signal line period |
+| `BB_PERIOD` | `20` | Bollinger Bands rolling period |
+| `BB_STD` | `2.0` | Bollinger Bands standard deviation multiplier |
+| `VOLUME_SPIKE_PERIOD` | `20` | Periods for the volume rolling average |
+| `VOLUME_SPIKE_MULTIPLIER` | `2.0` | Volume spike threshold (× rolling average) |
+| `DIVERGENCE_LOOKBACK` | `14` | Candles to scan for RSI/price divergence |
+| `PRICE_ALERT_HIGH` | *(disabled)* | One-time alert when price crosses above this |
+| `PRICE_ALERT_LOW` | *(disabled)* | One-time alert when price crosses below this |
+| `ATH_LOOKBACK_CANDLES` | `0` (disabled) | Candles for the rolling ATH calculation |
+| `ATH_PROXIMITY_PCT` | `5.0` | Alert when price is within this % of ATH |
+| `PRICE_MOVE_PCT_THRESHOLD` | `0` (disabled) | Alert on candle move above this % |
 | `POLL_INTERVAL_SECONDS` | `60` | Seconds between each data fetch |
 | `HEARTBEAT_INTERVAL_HOURS` | `24` | Hours between daily summary messages |
 | `SIGNAL_COOLDOWN_HOURS` | `4` | Minimum hours between repeated same-type alerts |
+| `CIRCUIT_BREAKER_ERRORS` | `5` | Consecutive errors before circuit-breaker alert |
+| `PROMETHEUS_PORT` | `0` (disabled) | Port for the Prometheus `/metrics` endpoint |
+| `DB_PATH` | `signals.db` | Path for the SQLite signal history database |
 
 ---
 
-## Project structure
+## Project Structure
 
 ```
 btc-assistant/
-├── bot.py            # Signal bot (main entry point)
-├── requirements.txt  # Python dependencies
-├── .env.example      # Environment variable template
+├── bot.py             # Signal bot (main entry point)
+├── requirements.txt   # Python dependencies
+├── Dockerfile         # Docker image definition
+├── docker-compose.yml # Docker Compose service definition
+├── .env.example       # Environment variable template
 └── README.md
 ```
 
@@ -119,4 +192,6 @@ btc-assistant/
 
 ## Disclaimer
 
-This bot is for **informational purposes only** and does **not** constitute financial advice. It never executes trades on your behalf. Always do your own research before making investment decisions.
+This bot is for **informational purposes only** and does **not** constitute financial
+advice. It never executes trades on your behalf. Always do your own research before
+making investment decisions.

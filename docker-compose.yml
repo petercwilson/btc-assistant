@@ -1,0 +1,16 @@
+services:
+  signal-bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Store the SQLite history database in the persistent volume
+      DB_PATH: /app/data/signals.db
+    volumes:
+      - bot_data:/app/data
+    # Uncomment to expose the Prometheus /metrics endpoint on the host
+    # ports:
+    #   - "8000:8000"
+
+volumes:
+  bot_data:
