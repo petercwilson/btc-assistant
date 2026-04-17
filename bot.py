@@ -168,8 +168,8 @@ def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """Add SMA and RSI columns to the OHLCV DataFrame."""
     df = df.copy()
 
-    # 200-period Simple Moving Average
-    df["sma200"] = df["close"].rolling(window=SMA_PERIOD).mean()
+    # Simple Moving Average (configurable period)
+    df["sma"] = df["close"].rolling(window=SMA_PERIOD).mean()
 
     # 14-period RSI (Wilder / EMA smoothing via pandas ewm)
     delta = df["close"].diff()
@@ -206,24 +206,24 @@ def check_and_notify(
     """
     latest = df.iloc[-1]
     price: float = latest["close"]
-    sma200: float = latest["sma200"]
+    sma: float = latest["sma"]
     rsi: float = latest["rsi"]
 
-    if pd.isna(sma200) or pd.isna(rsi):
+    if pd.isna(sma) or pd.isna(rsi):
         logger.warning("Not enough data to calculate indicators yet.")
         return
 
-    logger.info("Price: %.2f | SMA200: %.2f | RSI: %.2f", price, sma200, rsi)
+    logger.info("Price: %.2f | SMA%d: %.2f | RSI: %.2f", price, SMA_PERIOD, sma, rsi)
     now = datetime.now(UTC)
     cooldown = timedelta(hours=SIGNAL_COOLDOWN_HOURS)
 
-    if price > sma200 and rsi < RSI_BUY_THRESHOLD:
+    if price > sma and rsi < RSI_BUY_THRESHOLD:
         if last_signal["buy"] is None or now - last_signal["buy"] >= cooldown:
             message = (
                 "🟢 <b>BUY SIGNAL</b>\n\n"
-                f"Price:   <b>${price:,.2f}</b>\n"
-                f"RSI:     <b>{rsi:.2f}</b>\n"
-                f"200 SMA: <b>${sma200:,.2f}</b>"
+                f"Price:    <b>${price:,.2f}</b>\n"
+                f"RSI:      <b>{rsi:.2f}</b>\n"
+                f"SMA{SMA_PERIOD}: <b>${sma:,.2f}</b>"
             )
             send_telegram_message(message)
             last_signal["buy"] = now
@@ -231,7 +231,7 @@ def check_and_notify(
 
     # The SELL signal deliberately omits a trend filter: RSI overbought
     # conditions are actionable regardless of whether price is above or below
-    # the 200 SMA, since extreme readings in either trend direction carry risk.
+    # the SMA, since extreme readings in either trend direction carry risk.
     elif rsi > RSI_SELL_THRESHOLD:
         if last_signal["sell"] is None or now - last_signal["sell"] >= cooldown:
             message = (
@@ -258,15 +258,15 @@ def send_daily_summary(df: pd.DataFrame, signals_counter: dict[str, int]) -> Non
     """
     latest = df.iloc[-1]
     price: float = latest["close"]
-    sma200: float = latest["sma200"]
+    sma: float = latest["sma"]
     rsi: float = latest["rsi"]
 
     rsi_str = f"{rsi:.2f}" if not pd.isna(rsi) else "N/A"
 
-    if not pd.isna(sma200):
-        pct = (price - sma200) / sma200 * 100
+    if not pd.isna(sma):
+        pct = (price - sma) / sma * 100
         direction = "above" if pct >= 0 else "below"
-        sma_str = f"<b>${sma200:,.2f}</b> ({direction} by {abs(pct):.1f}%)"
+        sma_str = f"<b>${sma:,.2f}</b> ({direction} by {abs(pct):.1f}%)"
     else:
         sma_str = "N/A"
 
