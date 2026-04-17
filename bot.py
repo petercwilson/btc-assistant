@@ -395,13 +395,22 @@ def _telegram_answer_callback(callback_id: str) -> None:
         pass  # best-effort — never block the main loop
 
 
+def _symbol_to_safe(symbol: str) -> str:
+    """Convert a trading pair to a safe string suitable for callback data.
+
+    Replaces ``/`` with ``_`` so ``BTC/USDT`` becomes ``BTC_USDT``.
+    The inverse is performed in the command handler when decoding callbacks.
+    """
+    return symbol.replace("/", "_")
+
+
 def _make_snooze_keyboard(symbol: str, signal_type: str) -> dict:
     """Return an InlineKeyboardMarkup dict with "Snooze 1h" / "Snooze 4h" buttons.
 
     Callback data format: ``snooze:<symbol_safe>:<signal_type>:<hours>``
-    where *symbol_safe* has ``/`` replaced by ``_`` (e.g. ``BTC_USDT``).
+    where *symbol_safe* is produced by ``_symbol_to_safe`` (e.g. ``BTC_USDT``).
     """
-    sym_safe = symbol.replace("/", "_")
+    sym_safe = _symbol_to_safe(symbol)
     return {
         "inline_keyboard": [
             [
@@ -531,9 +540,11 @@ def _signal_strength(rsi: float, sma: float, price: float, direction: str) -> in
     *direction* must be ``"buy"`` or ``"sell"``.
     """
     if direction == "buy":
-        rsi_score = max(0.0, (RSI_BUY_THRESHOLD - rsi) / RSI_BUY_THRESHOLD) * 2.5
+        denominator = RSI_BUY_THRESHOLD if RSI_BUY_THRESHOLD > 0 else 1.0
+        rsi_score = max(0.0, (RSI_BUY_THRESHOLD - rsi) / denominator) * 2.5
     else:
-        rsi_score = max(0.0, (rsi - RSI_SELL_THRESHOLD) / (100 - RSI_SELL_THRESHOLD)) * 2.5
+        denominator = (100 - RSI_SELL_THRESHOLD) if RSI_SELL_THRESHOLD < 100 else 1.0
+        rsi_score = max(0.0, (rsi - RSI_SELL_THRESHOLD) / denominator) * 2.5
 
     if not pd.isna(sma) and sma > 0:
         # Cap price/SMA contribution at 2.5 (5% move = max score)
@@ -541,8 +552,7 @@ def _signal_strength(rsi: float, sma: float, price: float, direction: str) -> in
     else:
         price_score = 0.0
 
-    raw = rsi_score + price_score
-    return max(1, min(5, round(raw) or 1))
+    return max(1, min(5, round(rsi_score + price_score)))
 
 
 def _is_volume_spike(latest: pd.Series) -> bool:
@@ -555,6 +565,11 @@ def _is_volume_spike(latest: pd.Series) -> bool:
         and vol_mean > 0
         and vol >= VOLUME_SPIKE_MULTIPLIER * vol_mean
     )
+
+
+# Price tolerance for divergence detection: price is considered "near" an
+# extreme when it is within this percentage of the first-half pivot price.
+_DIVERGENCE_PRICE_TOLERANCE = 0.02  # 2%
 
 
 def _detect_divergence(df: pd.DataFrame) -> str | None:
@@ -579,19 +594,20 @@ def _detect_divergence(df: pd.DataFrame) -> str | None:
     mid = len(window) // 2
     current_price = closes[-1]
     current_rsi = rsis[-1]
+    tolerance = _DIVERGENCE_PRICE_TOLERANCE
 
     # Bullish divergence: current price near the first-half low, RSI relatively higher
     low_idx = int(closes[:mid].argmin())
     first_half_price_low = closes[low_idx]
     first_half_rsi_at_low = rsis[low_idx]
-    if current_price <= first_half_price_low * 1.02 and current_rsi > first_half_rsi_at_low:
+    if current_price <= first_half_price_low * (1 + tolerance) and current_rsi > first_half_rsi_at_low:
         return "bullish"
 
     # Bearish divergence: current price near the first-half high, RSI relatively lower
     high_idx = int(closes[:mid].argmax())
     first_half_price_high = closes[high_idx]
     first_half_rsi_at_high = rsis[high_idx]
-    if current_price >= first_half_price_high * 0.98 and current_rsi < first_half_rsi_at_high:
+    if current_price >= first_half_price_high * (1 - tolerance) and current_rsi < first_half_rsi_at_high:
         return "bearish"
 
     return None
@@ -623,7 +639,8 @@ def _confirm_signal(
         if direction == "buy":
             return bool(price > sma and rsi < RSI_BUY_THRESHOLD)
         return bool(rsi > RSI_SELL_THRESHOLD)
-    except Exception as exc:  # noqa: BLE001
+    except (ccxt.NetworkError, ccxt.ExchangeError, requests.exceptions.RequestException,
+            KeyError, IndexError, ValueError) as exc:
         logger.warning(
             "[%s] Confirmation fetch on %s failed (%s); proceeding without confirmation.",
             symbol, CONFIRM_TIMEFRAME, exc,
@@ -803,7 +820,7 @@ def check_and_notify(
                 f"RSI:   <b>{rsi:.2f}</b>\n"
                 f"(RSI/price divergence over last {DIVERGENCE_LOOKBACK} candles)"
             )
-            send_telegram_message(msg)
+            send_telegram_message(msg, reply_markup=_make_snooze_keyboard(symbol, div_key))
             _record_signal(state, div_key, symbol, price, rsi)
 
     # ── Large single-candle move ─────────────────────────────────────────────
@@ -819,7 +836,7 @@ def check_and_notify(
                     f"Open:  <b>${open_price:,.2f}</b>\n"
                     f"Close: <b>${price:,.2f}</b>"
                 )
-                send_telegram_message(msg)
+                send_telegram_message(msg, reply_markup=_make_snooze_keyboard(symbol, "price_move"))
                 _record_signal(state, "price_move", symbol, price, rsi, {"move_pct": move_pct})
 
     # ── ATH proximity ────────────────────────────────────────────────────────
@@ -838,7 +855,7 @@ def check_and_notify(
                     f"Rolling ATH ({ATH_LOOKBACK_CANDLES} candles): <b>${ath:,.2f}</b>\n"
                     f"Distance: <b>{distance_pct:.2f}%</b> below ATH"
                 )
-                send_telegram_message(msg)
+                send_telegram_message(msg, reply_markup=_make_snooze_keyboard(symbol, "ath_proximity"))
                 _record_signal(state, "ath_proximity", symbol, price, rsi, {"ath": ath})
 
     # ── One-time price level alerts ──────────────────────────────────────────
@@ -948,7 +965,7 @@ def _telegram_command_thread(symbol_states: dict) -> None:
                         until = datetime.now(UTC) + timedelta(hours=hours)
                         # Match symbol by safe name (BTC_USDT → BTC/USDT)
                         matched = next(
-                            (s for s in symbol_states if s.replace("/", "_") == sym_safe),
+                            (s for s in symbol_states if _symbol_to_safe(s) == sym_safe),
                             None,
                         )
                         if matched:
@@ -1108,6 +1125,11 @@ def main() -> None:
     # Register SIGTERM handler for graceful container shutdown
     _signal_module.signal(_signal_module.SIGTERM, _handle_sigterm)
 
+    if EXCHANGE_ID not in ccxt.exchanges:
+        raise ValueError(
+            f"Unknown exchange '{EXCHANGE_ID}'. "
+            f"Valid options include: {', '.join(sorted(ccxt.exchanges)[:10])}, ..."
+        )
     exchange = getattr(ccxt, EXCHANGE_ID)()
     symbol_states = {sym: _make_symbol_state() for sym in SYMBOLS}
 
