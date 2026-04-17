@@ -132,6 +132,41 @@ DB_PATH: str = "signals.db"
 TELEGRAM_MAX_RETRIES: int = 3
 RSI_EPSILON: float = 1e-10
 
+# Feature 1 — Advisor Brief
+ADVISOR_BRIEF_ENABLED: bool = False
+ADVISOR_BRIEF_HOUR_UTC: int = 13
+WEEKLY_BRIEF_ENABLED: bool = False
+WEEKLY_BRIEF_WEEKDAY: str = "Mon"
+
+# Feature 2 — Key Levels & Regime
+SWING_LOOKBACK: int = 20
+REGIME_SLOPE_PERIOD: int = 5
+KEY_LEVEL_BREAK_COOLDOWN_HOURS: int = 8
+REGIME_CHANGE_COOLDOWN_HOURS: int = 12
+
+# Feature 3 — Risk & Volatility
+BB_WIDTH_CHANGE_THRESHOLD: float = 20.0
+DRAWDOWN_WINDOW: int = 168
+DRAWDOWN_ALERT_THRESHOLDS: list[float] = [10.0, 20.0]
+RISK_OFF_COOLDOWN_HOURS: int = 24
+VOL_ALERT_COOLDOWN_HOURS: int = 12
+
+# Feature 5 — Macro Calendar
+MACRO_CALENDAR_ENABLED: bool = False
+MACRO_CALENDAR_PATH: str = "data/macro_calendar.json"
+MACRO_CALENDAR_LOOKAHEAD_HOURS: int = 24
+
+# Feature 6 — Portfolio Guidance
+DCA_REMINDER_ENABLED: bool = False
+DCA_REMINDER_WEEKDAY: str = "Mon"
+DCA_REMINDER_HOUR_UTC: int = 9
+RISK_TIP_ENABLED: bool = False
+RISK_TIP_WEEKDAY: str = "Sun"
+RISK_TIP_HOUR_UTC: int = 10
+
+# Feature 7 — Signal History
+SIGNAL_HISTORY_LOOKBACK: int = 200
+
 # ---------------------------------------------------------------------------
 # Shutdown event — set by SIGTERM or KeyboardInterrupt
 # ---------------------------------------------------------------------------
@@ -144,6 +179,26 @@ _shutdown = threading.Event()
 
 _mute_lock = threading.Lock()
 _global_mute_until: datetime | None = None
+
+# ---------------------------------------------------------------------------
+# Per-feature tracking state (in-memory, non-user operational state)
+# ---------------------------------------------------------------------------
+
+_last_advisor_brief_date: dict[str, Any] = {}
+_last_weekly_brief_date: dict[str, Any] = {}
+_last_dca_reminder_date: Any = None
+_last_risk_tip_date: Any = None
+_risk_tip_index: int = 0
+
+_RISK_TIPS = [
+    "💰 <b>Risk Tip</b>: Never invest more than you can afford to lose. Size positions based on your overall portfolio, not on conviction alone.",
+    "💰 <b>Risk Tip</b>: Dollar-cost averaging (DCA) reduces timing risk. Consider spreading entries over time rather than going all-in at once.",
+    "💰 <b>Risk Tip</b>: Keep a cash reserve. Dry powder lets you buy dips without forcing you to sell other positions.",
+    "💰 <b>Risk Tip</b>: Volatility is normal in crypto. Don't let short-term swings force long-term decisions.",
+    "💰 <b>Risk Tip</b>: Know your exit strategy before you enter. Decide in advance at what price or condition you would sell.",
+    "💰 <b>Risk Tip</b>: Diversification across assets reduces single-asset risk, even within crypto.",
+    "💰 <b>Risk Tip</b>: Signals are tools, not guarantees. Always consider the broader macro environment.",
+]
 
 # ---------------------------------------------------------------------------
 # Prometheus metric handles (populated in _init_prometheus)
@@ -175,6 +230,14 @@ def _load_config() -> None:
     global ATH_LOOKBACK_CANDLES, ATH_PROXIMITY_PCT, PRICE_MOVE_PCT_THRESHOLD
     global POLL_INTERVAL_SECONDS, HEARTBEAT_INTERVAL_HOURS, SIGNAL_COOLDOWN_HOURS
     global CIRCUIT_BREAKER_ERRORS, PROMETHEUS_PORT, DB_PATH
+    global ADVISOR_BRIEF_ENABLED, ADVISOR_BRIEF_HOUR_UTC, WEEKLY_BRIEF_ENABLED, WEEKLY_BRIEF_WEEKDAY
+    global SWING_LOOKBACK, REGIME_SLOPE_PERIOD, KEY_LEVEL_BREAK_COOLDOWN_HOURS, REGIME_CHANGE_COOLDOWN_HOURS
+    global BB_WIDTH_CHANGE_THRESHOLD, DRAWDOWN_WINDOW, DRAWDOWN_ALERT_THRESHOLDS
+    global RISK_OFF_COOLDOWN_HOURS, VOL_ALERT_COOLDOWN_HOURS
+    global MACRO_CALENDAR_ENABLED, MACRO_CALENDAR_PATH, MACRO_CALENDAR_LOOKAHEAD_HOURS
+    global DCA_REMINDER_ENABLED, DCA_REMINDER_WEEKDAY, DCA_REMINDER_HOUR_UTC
+    global RISK_TIP_ENABLED, RISK_TIP_WEEKDAY, RISK_TIP_HOUR_UTC
+    global SIGNAL_HISTORY_LOOKBACK
 
     EXCHANGE_ID = os.environ.get("EXCHANGE", EXCHANGE_ID)
     raw_symbols = os.environ.get("SYMBOLS", ",".join(SYMBOLS))
@@ -207,6 +270,31 @@ def _load_config() -> None:
     CIRCUIT_BREAKER_ERRORS = int(os.environ.get("CIRCUIT_BREAKER_ERRORS", CIRCUIT_BREAKER_ERRORS))
     PROMETHEUS_PORT = int(os.environ.get("PROMETHEUS_PORT", PROMETHEUS_PORT))
     DB_PATH = os.environ.get("DB_PATH", DB_PATH)
+    ADVISOR_BRIEF_ENABLED = os.environ.get("ADVISOR_BRIEF_ENABLED", "false").lower() in ("1", "true", "yes")
+    ADVISOR_BRIEF_HOUR_UTC = int(os.environ.get("ADVISOR_BRIEF_HOUR_UTC", ADVISOR_BRIEF_HOUR_UTC))
+    WEEKLY_BRIEF_ENABLED = os.environ.get("WEEKLY_BRIEF_ENABLED", "false").lower() in ("1", "true", "yes")
+    WEEKLY_BRIEF_WEEKDAY = os.environ.get("WEEKLY_BRIEF_WEEKDAY", WEEKLY_BRIEF_WEEKDAY)
+    SWING_LOOKBACK = int(os.environ.get("SWING_LOOKBACK", SWING_LOOKBACK))
+    REGIME_SLOPE_PERIOD = int(os.environ.get("REGIME_SLOPE_PERIOD", REGIME_SLOPE_PERIOD))
+    KEY_LEVEL_BREAK_COOLDOWN_HOURS = int(os.environ.get("KEY_LEVEL_BREAK_COOLDOWN_HOURS", KEY_LEVEL_BREAK_COOLDOWN_HOURS))
+    REGIME_CHANGE_COOLDOWN_HOURS = int(os.environ.get("REGIME_CHANGE_COOLDOWN_HOURS", REGIME_CHANGE_COOLDOWN_HOURS))
+    BB_WIDTH_CHANGE_THRESHOLD = float(os.environ.get("BB_WIDTH_CHANGE_THRESHOLD", BB_WIDTH_CHANGE_THRESHOLD))
+    DRAWDOWN_WINDOW = int(os.environ.get("DRAWDOWN_WINDOW", DRAWDOWN_WINDOW))
+    _raw_dd = os.environ.get("DRAWDOWN_ALERT_THRESHOLDS", "")
+    if _raw_dd:
+        DRAWDOWN_ALERT_THRESHOLDS = [float(x.strip()) for x in _raw_dd.split(",") if x.strip()]
+    RISK_OFF_COOLDOWN_HOURS = int(os.environ.get("RISK_OFF_COOLDOWN_HOURS", RISK_OFF_COOLDOWN_HOURS))
+    VOL_ALERT_COOLDOWN_HOURS = int(os.environ.get("VOL_ALERT_COOLDOWN_HOURS", VOL_ALERT_COOLDOWN_HOURS))
+    MACRO_CALENDAR_ENABLED = os.environ.get("MACRO_CALENDAR_ENABLED", "false").lower() in ("1", "true", "yes")
+    MACRO_CALENDAR_PATH = os.environ.get("MACRO_CALENDAR_PATH", MACRO_CALENDAR_PATH)
+    MACRO_CALENDAR_LOOKAHEAD_HOURS = int(os.environ.get("MACRO_CALENDAR_LOOKAHEAD_HOURS", MACRO_CALENDAR_LOOKAHEAD_HOURS))
+    DCA_REMINDER_ENABLED = os.environ.get("DCA_REMINDER_ENABLED", "false").lower() in ("1", "true", "yes")
+    DCA_REMINDER_WEEKDAY = os.environ.get("DCA_REMINDER_WEEKDAY", DCA_REMINDER_WEEKDAY)
+    DCA_REMINDER_HOUR_UTC = int(os.environ.get("DCA_REMINDER_HOUR_UTC", DCA_REMINDER_HOUR_UTC))
+    RISK_TIP_ENABLED = os.environ.get("RISK_TIP_ENABLED", "false").lower() in ("1", "true", "yes")
+    RISK_TIP_WEEKDAY = os.environ.get("RISK_TIP_WEEKDAY", RISK_TIP_WEEKDAY)
+    RISK_TIP_HOUR_UTC = int(os.environ.get("RISK_TIP_HOUR_UTC", RISK_TIP_HOUR_UTC))
+    SIGNAL_HISTORY_LOOKBACK = int(os.environ.get("SIGNAL_HISTORY_LOOKBACK", SIGNAL_HISTORY_LOOKBACK))
 
     logger.info(
         "Config: EXCHANGE=%s SYMBOLS=%s TIMEFRAME=%s CONFIRM=%s "
@@ -259,7 +347,7 @@ def _init_prometheus() -> None:
 
 
 def init_db() -> None:
-    """Create the signals history table if it does not exist."""
+    """Create the signals history table and event_reminders table if they do not exist."""
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             """
@@ -271,6 +359,16 @@ def init_db() -> None:
                 price       REAL    NOT NULL,
                 rsi         REAL,
                 extra       TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS event_reminders (
+                event_id     TEXT    NOT NULL,
+                hours_before INTEGER NOT NULL,
+                sent_at      TEXT    NOT NULL,
+                PRIMARY KEY (event_id, hours_before)
             )
             """
         )
@@ -779,6 +877,470 @@ def _record_signal(
 
 
 # ---------------------------------------------------------------------------
+# Feature 7 — Signal history helpers
+# ---------------------------------------------------------------------------
+
+
+def _signal_occurrence_count(df: pd.DataFrame, signal_type: str) -> int | None:
+    """Count how many times *signal_type* occurred in the last SIGNAL_HISTORY_LOOKBACK candles."""
+    window = df.tail(SIGNAL_HISTORY_LOOKBACK)
+    if len(window) < 10:
+        return None
+    try:
+        close = window["close"]
+        if signal_type == "buy":
+            sma = close.rolling(window=SMA_PERIOD).mean()
+            rsi_delta = close.diff()
+            gain = rsi_delta.clip(lower=0)
+            loss = -rsi_delta.clip(upper=0)
+            avg_gain = gain.ewm(com=RSI_PERIOD - 1, min_periods=RSI_PERIOD).mean()
+            avg_loss = loss.ewm(com=RSI_PERIOD - 1, min_periods=RSI_PERIOD).mean()
+            rs = avg_gain / avg_loss.replace(0, RSI_EPSILON)
+            rsi = 100 - (100 / (1 + rs))
+            return int(((close > sma) & (rsi < RSI_BUY_THRESHOLD)).sum())
+        elif signal_type == "sell":
+            rsi_delta = close.diff()
+            gain = rsi_delta.clip(lower=0)
+            loss = -rsi_delta.clip(upper=0)
+            avg_gain = gain.ewm(com=RSI_PERIOD - 1, min_periods=RSI_PERIOD).mean()
+            avg_loss = loss.ewm(com=RSI_PERIOD - 1, min_periods=RSI_PERIOD).mean()
+            rs = avg_gain / avg_loss.replace(0, RSI_EPSILON)
+            rsi = 100 - (100 / (1 + rs))
+            return int((rsi > RSI_SELL_THRESHOLD).sum())
+        elif signal_type == "macd_buy":
+            ema_fast = close.ewm(span=MACD_FAST, adjust=False).mean()
+            ema_slow = close.ewm(span=MACD_SLOW, adjust=False).mean()
+            macd = ema_fast - ema_slow
+            macd_signal = macd.ewm(span=MACD_SIGNAL_PERIOD, adjust=False).mean()
+            hist = macd - macd_signal
+            return int(((hist > 0) & (hist.shift(1) <= 0)).sum())
+        elif signal_type == "macd_sell":
+            ema_fast = close.ewm(span=MACD_FAST, adjust=False).mean()
+            ema_slow = close.ewm(span=MACD_SLOW, adjust=False).mean()
+            macd = ema_fast - ema_slow
+            macd_signal = macd.ewm(span=MACD_SIGNAL_PERIOD, adjust=False).mean()
+            hist = macd - macd_signal
+            return int(((hist < 0) & (hist.shift(1) >= 0)).sum())
+        elif signal_type == "bb_upper":
+            bb_mid = close.rolling(window=BB_PERIOD).mean()
+            bb_std = close.rolling(window=BB_PERIOD).std()
+            bb_upper = bb_mid + BB_STD * bb_std
+            return int((close > bb_upper).sum())
+        elif signal_type == "bb_lower":
+            bb_mid = close.rolling(window=BB_PERIOD).mean()
+            bb_std = close.rolling(window=BB_PERIOD).std()
+            bb_lower = bb_mid - BB_STD * bb_std
+            return int((close < bb_lower).sum())
+        elif signal_type == "price_move":
+            if PRICE_MOVE_PCT_THRESHOLD <= 0:
+                return None
+            open_p = window["open"]
+            move = ((close - open_p) / open_p.replace(0, float("nan"))).abs() * 100
+            return int((move >= PRICE_MOVE_PCT_THRESHOLD).sum())
+        else:
+            return None
+    except Exception:  # noqa: BLE001
+        logger.debug("Signal occurrence count failed for %s", signal_type, exc_info=True)
+        return None
+
+
+def _freq_tag(count: int | None, lookback: int) -> str:
+    """Return a formatted frequency stat line or empty string."""
+    if count is None:
+        return ""
+    return f"📊 <i>Occurred {count}× in last {lookback} candles</i>\n"
+
+
+# ---------------------------------------------------------------------------
+# Feature 2 — Key Levels & Regime Detection
+# ---------------------------------------------------------------------------
+
+
+def _detect_swing_levels(df: pd.DataFrame) -> dict:
+    """Return swing high and low from the first half of the last SWING_LOOKBACK*2 candles."""
+    window_size = SWING_LOOKBACK * 2
+    window = df.tail(window_size)
+    if len(window) < SWING_LOOKBACK:
+        return {"swing_high": None, "swing_low": None}
+    first_half = window.iloc[: SWING_LOOKBACK]
+    swing_high = float(first_half["high"].max()) if not first_half.empty else None
+    swing_low = float(first_half["low"].min()) if not first_half.empty else None
+    return {"swing_high": swing_high, "swing_low": swing_low}
+
+
+def _classify_regime(df: pd.DataFrame) -> str:
+    """Classify market regime using SMA slope over the last REGIME_SLOPE_PERIOD candles."""
+    if len(df) < REGIME_SLOPE_PERIOD + SMA_PERIOD:
+        return "unknown"
+    sma_series = df["close"].rolling(window=SMA_PERIOD).mean()
+    recent = sma_series.dropna().tail(REGIME_SLOPE_PERIOD)
+    if len(recent) < 2:
+        return "unknown"
+    first_val = float(recent.iloc[0])
+    last_val = float(recent.iloc[-1])
+    if first_val <= 0:
+        return "unknown"
+    slope_pct = (last_val - first_val) / first_val * 100
+    if slope_pct > 0.5:
+        return "trend_up"
+    if slope_pct < -0.5:
+        return "trend_down"
+    return "range"
+
+
+def check_key_levels_regime(symbol: str, df: pd.DataFrame, state: dict) -> None:
+    """Check for regime changes and key level breaks; send alerts as needed."""
+    now = datetime.now(UTC)
+    latest = df.iloc[-1]
+    price = float(latest["close"])
+
+    regime = _classify_regime(df)
+    swings = _detect_swing_levels(df)
+    state["last_swing_high"] = swings["swing_high"]
+    state["last_swing_low"] = swings["swing_low"]
+
+    # Regime change alert
+    old_regime = state.get("last_regime")
+    if old_regime is not None and regime != old_regime and regime != "unknown":
+        last_alert = state.get("last_regime_alert")
+        cooldown_ok = (
+            last_alert is None
+            or (now - last_alert) >= timedelta(hours=REGIME_CHANGE_COOLDOWN_HOURS)
+        )
+        if cooldown_ok:
+            try:
+                send_telegram_message(
+                    f"🔄 <b>Regime Change — {symbol}</b>\n\n"
+                    f"Market shifted: <b>{old_regime}</b> → <b>{regime}</b>\n"
+                    f"Price: <b>${price:,.2f}</b>\n"
+                    f"<i>Regime is estimated from SMA{SMA_PERIOD} slope over {REGIME_SLOPE_PERIOD} candles.</i>"
+                )
+            except Exception:  # noqa: BLE001
+                pass
+            state["last_regime_alert"] = now
+    state["last_regime"] = regime
+
+    # Key level break alerts
+    swing_high = swings["swing_high"]
+    swing_low = swings["swing_low"]
+    last_kl_alert = state.get("last_key_level_break_alert")
+    kl_cooldown_ok = (
+        last_kl_alert is None
+        or (now - last_kl_alert) >= timedelta(hours=KEY_LEVEL_BREAK_COOLDOWN_HOURS)
+    )
+    if kl_cooldown_ok:
+        if swing_high is not None and price > swing_high:
+            try:
+                send_telegram_message(
+                    f"📈 <b>Resistance Break — {symbol}</b>\n\n"
+                    f"Price <b>${price:,.2f}</b> broke above swing high <b>${swing_high:,.2f}</b>\n"
+                    f"<i>💡 Why it matters: A confirmed break above prior resistance can signal continuation or a new trend leg.</i>"
+                )
+            except Exception:  # noqa: BLE001
+                pass
+            state["last_key_level_break_alert"] = now
+        elif swing_low is not None and price < swing_low:
+            try:
+                send_telegram_message(
+                    f"📉 <b>Support Break — {symbol}</b>\n\n"
+                    f"Price <b>${price:,.2f}</b> broke below swing low <b>${swing_low:,.2f}</b>\n"
+                    f"<i>💡 Why it matters: A break below prior support increases downside risk and may accelerate selling.</i>"
+                )
+            except Exception:  # noqa: BLE001
+                pass
+            state["last_key_level_break_alert"] = now
+
+
+# ---------------------------------------------------------------------------
+# Feature 3 — Risk & Volatility Alerts
+# ---------------------------------------------------------------------------
+
+
+def check_risk_volatility(symbol: str, df: pd.DataFrame, state: dict) -> None:
+    """Check BB width changes, drawdown levels, and risk-off composite signals."""
+    now = datetime.now(UTC)
+    latest = df.iloc[-1]
+    price = float(latest["close"])
+    bb_upper = float(latest.get("bb_upper", float("nan")))
+    bb_lower = float(latest.get("bb_lower", float("nan")))
+    bb_mid = float(latest.get("bb_mid", float("nan")))
+    macd_hist = float(latest.get("macd_hist", float("nan")))
+    rsi = float(latest.get("rsi", float("nan")))
+    sma = float(latest.get("sma", float("nan")))
+
+    # BB width change alert
+    if not any(pd.isna(v) for v in [bb_upper, bb_lower, bb_mid]) and bb_mid > 0:
+        current_width = (bb_upper - bb_lower) / bb_mid * 100
+        last_width = state.get("last_bb_width")
+        if last_width is not None and last_width > 0:
+            width_change_pct = (current_width - last_width) / last_width * 100
+            last_vol_alert = state.get("last_vol_alert")
+            vol_cooldown_ok = (
+                last_vol_alert is None
+                or (now - last_vol_alert) >= timedelta(hours=VOL_ALERT_COOLDOWN_HOURS)
+            )
+            if abs(width_change_pct) > BB_WIDTH_CHANGE_THRESHOLD and vol_cooldown_ok:
+                if width_change_pct > 0:
+                    label = "Volatility Expansion"
+                    note = "Expanding bands suggest increased uncertainty — wider price swings likely."
+                else:
+                    label = "Volatility Contraction"
+                    note = "Contracting bands suggest consolidation — a breakout may be imminent."
+                try:
+                    send_telegram_message(
+                        f"📊 <b>{label} — {symbol}</b>\n\n"
+                        f"BB width changed <b>{width_change_pct:+.1f}%</b> "
+                        f"(now {current_width:.1f}%)\n"
+                        f"Price: <b>${price:,.2f}</b>\n"
+                        f"<i>💡 Why it matters: {note}</i>"
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+                state["last_vol_alert"] = now
+        state["last_bb_width"] = current_width
+
+    # Drawdown alert
+    high_col = df["high"].tail(DRAWDOWN_WINDOW)
+    if not high_col.empty:
+        rolling_high = float(high_col.max())
+        state["rolling_high"] = rolling_high
+        if rolling_high > 0:
+            drawdown_pct = (rolling_high - price) / rolling_high * 100
+            for threshold in DRAWDOWN_ALERT_THRESHOLDS:
+                last_dd_alert = state["last_drawdown_alert"].get(threshold)
+                dd_cooldown_ok = (
+                    last_dd_alert is None
+                    or (now - last_dd_alert) >= timedelta(hours=48)
+                )
+                if drawdown_pct >= threshold and dd_cooldown_ok:
+                    try:
+                        send_telegram_message(
+                            f"📉 <b>Drawdown Alert — {symbol}</b>\n\n"
+                            f"Price is <b>{drawdown_pct:.1f}%</b> below the {DRAWDOWN_WINDOW}-candle high "
+                            f"(${rolling_high:,.2f})\n"
+                            f"Current: <b>${price:,.2f}</b>\n"
+                            f"<i>💡 Why it matters: A {threshold:.0f}%+ drawdown from recent highs indicates significant selling pressure.</i>"
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
+                    state["last_drawdown_alert"][threshold] = now
+
+    # Risk-off composite signal
+    if not any(pd.isna(v) for v in [price, sma, bb_upper, bb_lower, bb_mid, macd_hist, rsi]):
+        if bb_mid > 0:
+            current_width = (bb_upper - bb_lower) / bb_mid * 100
+            last_bb = state.get("last_bb_width") or current_width
+            expanding = current_width > last_bb
+            risk_off = (
+                price < sma
+                and expanding
+                and macd_hist < 0
+                and rsi > 55
+            )
+            last_ro_alert = state.get("last_risk_off_alert")
+            ro_cooldown_ok = (
+                last_ro_alert is None
+                or (now - last_ro_alert) >= timedelta(hours=RISK_OFF_COOLDOWN_HOURS)
+            )
+            if risk_off and ro_cooldown_ok:
+                try:
+                    send_telegram_message(
+                        f"⚠️ <b>Risk-Off Signal — {symbol}</b>\n\n"
+                        f"Price: <b>${price:,.2f}</b> (below SMA{SMA_PERIOD})\n"
+                        f"RSI: <b>{rsi:.1f}</b> | MACD hist: <b>{macd_hist:+.4f}</b>\n"
+                        f"BB width expanding: <b>yes</b>\n"
+                        f"<i>Multiple bearish conditions aligned — consider reducing risk exposure.</i>"
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
+                state["last_risk_off_alert"] = now
+
+
+# ---------------------------------------------------------------------------
+# Feature 1 — Advisor Brief
+# ---------------------------------------------------------------------------
+
+
+def send_advisor_brief(symbol: str, df: pd.DataFrame, state: dict) -> None:
+    """Send a structured advisor-style market brief for *symbol*."""
+    latest = df.iloc[-1]
+    price = float(latest["close"])
+    sma = float(latest.get("sma", float("nan")))
+    rsi = float(latest.get("rsi", float("nan")))
+    macd_hist = float(latest.get("macd_hist", float("nan")))
+    bb_upper = float(latest.get("bb_upper", float("nan")))
+    bb_lower = float(latest.get("bb_lower", float("nan")))
+    bb_mid = float(latest.get("bb_mid", float("nan")))
+
+    if any(pd.isna(v) for v in [price, sma, rsi, bb_upper, bb_lower, bb_mid]):
+        logger.warning("[%s] Insufficient data for advisor brief.", symbol)
+        return
+
+    # Trend analysis
+    sma_pct = (price - sma) / sma * 100
+    trend_pos = "above" if sma_pct >= 0 else "below"
+    sma_series = df["close"].rolling(window=SMA_PERIOD).mean().dropna()
+    slope_label = "flat"
+    if len(sma_series) >= REGIME_SLOPE_PERIOD:
+        s_first = float(sma_series.iloc[-REGIME_SLOPE_PERIOD])
+        s_last = float(sma_series.iloc[-1])
+        if s_first > 0:
+            s_pct = (s_last - s_first) / s_first * 100
+            slope_label = "rising" if s_pct > 0.2 else ("falling" if s_pct < -0.2 else "flat")
+
+    # Momentum
+    rsi_label = "oversold" if rsi < 35 else ("overbought" if rsi > 65 else "neutral")
+    macd_dir = "positive" if not pd.isna(macd_hist) and macd_hist > 0 else "negative"
+
+    # Volatility
+    bb_width = (bb_upper - bb_lower) / bb_mid * 100
+    recent_bb_widths = (
+        (df["bb_upper"].tail(20) - df["bb_lower"].tail(20))
+        / df["bb_mid"].tail(20).replace(0, float("nan"))
+        * 100
+    ).dropna()
+    avg_width = float(recent_bb_widths.mean()) if not recent_bb_widths.empty else bb_width
+    vol_label = (
+        "expanding" if bb_width > avg_width * 1.1
+        else ("contracting" if bb_width < avg_width * 0.9 else "stable")
+    )
+
+    # Key levels
+    swings = _detect_swing_levels(df)
+    swing_high = swings.get("swing_high")
+    swing_low = swings.get("swing_low")
+    range_pct = (
+        (swing_high - swing_low) / swing_low * 100
+        if swing_high and swing_low and swing_low > 0
+        else None
+    )
+
+    # Drawdown
+    rolling_high_val = df["high"].tail(DRAWDOWN_WINDOW).max()
+    drawdown = (rolling_high_val - price) / rolling_high_val * 100 if rolling_high_val > 0 else 0.0
+
+    # Regime
+    regime = _classify_regime(df)
+
+    # Risk posture (deterministic)
+    if price > sma and rsi < 50 and regime == "trend_up":
+        posture = "Aggressive 🟢"
+        posture_note = "Trend and momentum aligned to the upside. Acceptable risk window."
+        change_view = f"A close below SMA{SMA_PERIOD} or RSI rising above 65 would shift bias to Neutral/Conservative."
+    elif price < sma or rsi > 65:
+        posture = "Conservative 🔴"
+        posture_note = "Price or momentum conditions are unfavorable. Reduce exposure."
+        change_view = f"A sustained close above SMA{SMA_PERIOD} with RSI recovering below 55 would shift bias to Neutral."
+    else:
+        posture = "Neutral 🟡"
+        posture_note = "No clear directional edge. Watch for confirmation."
+        change_view = "Watch for RSI breaking below 40 (bullish) or above 65 (bearish) to define next posture."
+
+    swing_high_str = f"${swing_high:,.2f}" if swing_high else "N/A"
+    swing_low_str = f"${swing_low:,.2f}" if swing_low else "N/A"
+    range_str = f"{range_pct:.1f}%" if range_pct is not None else "N/A"
+
+    message = (
+        f"📋 <b>Advisor Brief — {symbol}</b>\n\n"
+        f"<b>📈 Trend</b>\n"
+        f"Price <b>${price:,.2f}</b> is {trend_pos} SMA{SMA_PERIOD} by <b>{abs(sma_pct):.1f}%</b>. "
+        f"SMA slope: <b>{slope_label}</b>.\n\n"
+        f"<b>⚡ Momentum</b>\n"
+        f"RSI: <b>{rsi:.1f}</b> ({rsi_label}). MACD histogram: <b>{macd_dir}</b>.\n\n"
+        f"<b>📊 Volatility</b>\n"
+        f"BB width: <b>{bb_width:.1f}%</b> ({vol_label} vs 20-candle avg {avg_width:.1f}%).\n\n"
+        f"<b>🎯 Key Levels</b>\n"
+        f"Swing high: <b>{swing_high_str}</b> | Swing low: <b>{swing_low_str}</b>\n"
+        f"Recent range: <b>{range_str}</b> | Drawdown from {DRAWDOWN_WINDOW}c high: <b>{drawdown:.1f}%</b>\n\n"
+        f"<b>🛡 Risk Posture: {posture}</b>\n"
+        f"{posture_note}\n\n"
+        f"<b>🔍 What would change my view</b>\n"
+        f"• {change_view}\n\n"
+        f"ℹ️ <i>Informational only. Not financial advice.</i>"
+    )
+    send_telegram_message(message)
+
+
+# ---------------------------------------------------------------------------
+# Feature 5 — Event / Macro Calendar
+# ---------------------------------------------------------------------------
+
+
+def _is_event_reminder_sent(event_id: str, hours_before: int) -> bool:
+    """Return True if this event reminder has already been sent."""
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            row = conn.execute(
+                "SELECT 1 FROM event_reminders WHERE event_id=? AND hours_before=?",
+                (event_id, hours_before),
+            ).fetchone()
+            return row is not None
+    except sqlite3.Error:
+        return False
+
+
+def _mark_event_reminder_sent(event_id: str, hours_before: int) -> None:
+    """Record that this event reminder has been sent."""
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO event_reminders (event_id, hours_before, sent_at) VALUES (?, ?, ?)",
+                (event_id, hours_before, datetime.now(UTC).isoformat()),
+            )
+            conn.commit()
+    except sqlite3.Error as exc:
+        logger.warning("Failed to mark event reminder sent: %s", exc)
+
+
+def check_macro_reminders() -> None:
+    """Send reminders for upcoming macro calendar events."""
+    if not MACRO_CALENDAR_ENABLED:
+        return
+    try:
+        with open(MACRO_CALENDAR_PATH, encoding="utf-8") as fh:
+            events = json.load(fh)
+    except FileNotFoundError:
+        logger.debug("Macro calendar file not found: %s", MACRO_CALENDAR_PATH)
+        return
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("Failed to load macro calendar: %s", exc)
+        return
+
+    now = datetime.now(UTC)
+    for event in events:
+        event_id = event.get("id", "")
+        title = event.get("title", "Event")
+        utc_str = event.get("utc", "")
+        note = event.get("note", "")
+        if not utc_str:
+            continue
+        try:
+            event_time = datetime.fromisoformat(utc_str.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if event_time <= now:
+            continue
+        time_to_event = event_time - now
+        for hours_before in (MACRO_CALENDAR_LOOKAHEAD_HOURS, 1):
+            window_start = timedelta(hours=hours_before)
+            window_end = timedelta(hours=max(hours_before - 1, 0))
+            if window_end <= time_to_event <= window_start:
+                if not _is_event_reminder_sent(event_id, hours_before):
+                    hrs_left = time_to_event.total_seconds() / 3600
+                    try:
+                        send_telegram_message(
+                            f"📅 <b>Macro Event Reminder</b>\n\n"
+                            f"<b>{title}</b>\n"
+                            f"🕒 {event_time.strftime('%Y-%m-%d %H:%M UTC')} "
+                            f"(~{hrs_left:.1f}h away)\n"
+                            f"{note}"
+                        )
+                        _mark_event_reminder_sent(event_id, hours_before)
+                    except Exception:  # noqa: BLE001
+                        pass
+
+
+# ---------------------------------------------------------------------------
 # Main signal evaluation
 # ---------------------------------------------------------------------------
 
@@ -819,13 +1381,16 @@ def check_and_notify(
         if _can_alert(state, "buy") and _confirm_signal(exchange, symbol, "buy"):
             strength = _signal_strength(rsi, sma, price, "buy")
             stars = "⭐" * strength
+            freq = _freq_tag(_signal_occurrence_count(df, "buy"), SIGNAL_HISTORY_LOOKBACK)
             message = (
                 f"🟢 <b>BUY SIGNAL — {symbol}</b>\n\n"
                 f"Price:    <b>${price:,.2f}</b>\n"
                 f"RSI:      <b>{rsi:.2f}</b>\n"
                 f"SMA{SMA_PERIOD}: <b>${sma:,.2f}</b>\n"
                 f"{vol_tag}"
-                f"Strength: {stars} ({strength}/5)"
+                f"Strength: {stars} ({strength}/5)\n"
+                f"{freq}"
+                f"<i>💡 RSI oversold in an uptrend suggests potential mean reversion toward fair value.</i>"
             )
             send_telegram_message(message, reply_markup=_make_snooze_keyboard(symbol, "buy"))
             _record_signal(state, "buy", symbol, price, rsi)
@@ -838,12 +1403,15 @@ def check_and_notify(
         if _can_alert(state, "sell") and _confirm_signal(exchange, symbol, "sell"):
             strength = _signal_strength(rsi, sma, price, "sell")
             stars = "⭐" * strength
+            freq = _freq_tag(_signal_occurrence_count(df, "sell"), SIGNAL_HISTORY_LOOKBACK)
             message = (
                 f"🔴 <b>SELL SIGNAL — {symbol}</b>\n\n"
                 f"Price: <b>${price:,.2f}</b>\n"
                 f"RSI:   <b>{rsi:.2f}</b>\n"
                 f"{vol_tag}"
-                f"Strength: {stars} ({strength}/5)"
+                f"Strength: {stars} ({strength}/5)\n"
+                f"{freq}"
+                f"<i>💡 RSI overbought — momentum may be overextended; watch for reversal or continuation.</i>"
             )
             send_telegram_message(message, reply_markup=_make_snooze_keyboard(symbol, "sell"))
             _record_signal(state, "sell", symbol, price, rsi)
@@ -856,24 +1424,30 @@ def check_and_notify(
             if prev_hist < 0 < curr_hist:
                 # Histogram flipped from negative to positive → bullish crossover
                 if _can_alert(state, "macd_buy"):
+                    freq = _freq_tag(_signal_occurrence_count(df, "macd_buy"), SIGNAL_HISTORY_LOOKBACK)
                     msg = (
                         f"📈 <b>MACD BUY — {symbol}</b>\n\n"
                         f"Price:     <b>${price:,.2f}</b>\n"
                         f"Histogram: <b>{curr_hist:+.4f}</b>\n"
                         f"{vol_tag}"
-                        f"RSI: {rsi:.2f}"
+                        f"RSI: {rsi:.2f}\n"
+                        f"{freq}"
+                        f"<i>💡 MACD histogram flipped positive — short-term momentum shifting bullish.</i>"
                     )
                     send_telegram_message(msg, reply_markup=_make_snooze_keyboard(symbol, "macd_buy"))
                     _record_signal(state, "macd_buy", symbol, price, rsi, {"macd_hist": curr_hist})
             elif prev_hist > 0 > curr_hist:
                 # Histogram flipped from positive to negative → bearish crossover
                 if _can_alert(state, "macd_sell"):
+                    freq = _freq_tag(_signal_occurrence_count(df, "macd_sell"), SIGNAL_HISTORY_LOOKBACK)
                     msg = (
                         f"📉 <b>MACD SELL — {symbol}</b>\n\n"
                         f"Price:     <b>${price:,.2f}</b>\n"
                         f"Histogram: <b>{curr_hist:+.4f}</b>\n"
                         f"{vol_tag}"
-                        f"RSI: {rsi:.2f}"
+                        f"RSI: {rsi:.2f}\n"
+                        f"{freq}"
+                        f"<i>💡 MACD histogram flipped negative — short-term momentum shifting bearish.</i>"
                     )
                     send_telegram_message(msg, reply_markup=_make_snooze_keyboard(symbol, "macd_sell"))
                     _record_signal(state, "macd_sell", symbol, price, rsi, {"macd_hist": curr_hist})
@@ -884,21 +1458,27 @@ def check_and_notify(
     if not pd.isna(bb_upper) and not pd.isna(bb_lower):
         if price > bb_upper:
             if _can_alert(state, "bb_upper"):
+                freq = _freq_tag(_signal_occurrence_count(df, "bb_upper"), SIGNAL_HISTORY_LOOKBACK)
                 msg = (
                     f"📊 <b>BB Upper Break — {symbol}</b>\n\n"
                     f"Price:    <b>${price:,.2f}</b>  (above <b>${bb_upper:,.2f}</b>)\n"
                     f"{vol_tag}"
-                    f"RSI: {rsi:.2f}"
+                    f"RSI: {rsi:.2f}\n"
+                    f"{freq}"
+                    f"<i>💡 Price stretched above the upper band — statistically elevated; watch for snap-back or breakout continuation.</i>"
                 )
                 send_telegram_message(msg, reply_markup=_make_snooze_keyboard(symbol, "bb_upper"))
                 _record_signal(state, "bb_upper", symbol, price, rsi, {"bb_upper": bb_upper})
         elif price < bb_lower:
             if _can_alert(state, "bb_lower"):
+                freq = _freq_tag(_signal_occurrence_count(df, "bb_lower"), SIGNAL_HISTORY_LOOKBACK)
                 msg = (
                     f"📊 <b>BB Lower Break — {symbol}</b>\n\n"
                     f"Price:    <b>${price:,.2f}</b>  (below <b>${bb_lower:,.2f}</b>)\n"
                     f"{vol_tag}"
-                    f"RSI: {rsi:.2f}"
+                    f"RSI: {rsi:.2f}\n"
+                    f"{freq}"
+                    f"<i>💡 Price stretched below the lower band — statistically depressed; watch for bounce or continued sell-off.</i>"
                 )
                 send_telegram_message(msg, reply_markup=_make_snooze_keyboard(symbol, "bb_lower"))
                 _record_signal(state, "bb_lower", symbol, price, rsi, {"bb_lower": bb_lower})
@@ -909,11 +1489,16 @@ def check_and_notify(
         div_key = f"divergence_{divergence}"
         if _can_alert(state, div_key):
             label = "Bullish" if divergence == "bullish" else "Bearish"
+            if divergence == "bullish":
+                div_why = "Price making new lows while RSI rises — potential buying pressure building beneath."
+            else:
+                div_why = "Price making new highs while RSI falls — potential selling pressure building above."
             msg = (
                 f"🔀 <b>{label} Divergence — {symbol}</b>\n\n"
                 f"Price: <b>${price:,.2f}</b>\n"
                 f"RSI:   <b>{rsi:.2f}</b>\n"
-                f"(RSI/price divergence over last {DIVERGENCE_LOOKBACK} candles)"
+                f"(RSI/price divergence over last {DIVERGENCE_LOOKBACK} candles)\n"
+                f"<i>💡 {div_why}</i>"
             )
             send_telegram_message(msg, reply_markup=_make_snooze_keyboard(symbol, div_key))
             _record_signal(state, div_key, symbol, price, rsi)
@@ -925,11 +1510,14 @@ def check_and_notify(
             move_pct = abs((price - open_price) / open_price) * 100
             if move_pct >= PRICE_MOVE_PCT_THRESHOLD and _can_alert(state, "price_move"):
                 arrow = "📈" if price >= open_price else "📉"
+                freq = _freq_tag(_signal_occurrence_count(df, "price_move"), SIGNAL_HISTORY_LOOKBACK)
                 msg = (
                     f"⚡ <b>Large Candle Move — {symbol}</b>\n\n"
                     f"{arrow} Move:  <b>{move_pct:.2f}%</b>\n"
                     f"Open:  <b>${open_price:,.2f}</b>\n"
-                    f"Close: <b>${price:,.2f}</b>"
+                    f"Close: <b>${price:,.2f}</b>\n"
+                    f"{freq}"
+                    f"<i>💡 Unusually large single-candle move — watch for follow-through or snap-back volatility.</i>"
                 )
                 send_telegram_message(msg, reply_markup=_make_snooze_keyboard(symbol, "price_move"))
                 _record_signal(state, "price_move", symbol, price, rsi, {"move_pct": move_pct})
@@ -948,7 +1536,8 @@ def check_and_notify(
                     f"🏔 <b>ATH Proximity — {symbol}</b>\n\n"
                     f"Price: <b>${price:,.2f}</b>\n"
                     f"Rolling ATH ({ATH_LOOKBACK_CANDLES} candles): <b>${ath:,.2f}</b>\n"
-                    f"Distance: <b>{distance_pct:.2f}%</b> below ATH"
+                    f"Distance: <b>{distance_pct:.2f}%</b> below ATH\n"
+                    f"<i>💡 Price approaching rolling highs — potential resistance zone; a breakout would be technically significant.</i>"
                 )
                 send_telegram_message(msg, reply_markup=_make_snooze_keyboard(symbol, "ath_proximity"))
                 _record_signal(state, "ath_proximity", symbol, price, rsi, {"ath": ath})
@@ -960,7 +1549,8 @@ def check_and_notify(
             msg = (
                 f"🎯 <b>Price Alert ↑ — {symbol}</b>\n\n"
                 f"Price crossed above <b>${PRICE_ALERT_HIGH:,.2f}</b>\n"
-                f"Current: <b>${price:,.2f}</b>"
+                f"Current: <b>${price:,.2f}</b>\n"
+                f"<i>💡 Pre-set price level crossed — the level you were watching has been reached.</i>"
             )
             send_telegram_message(msg)
             log_signal(symbol, "price_alert_high", price, rsi)
@@ -971,11 +1561,22 @@ def check_and_notify(
             msg = (
                 f"🎯 <b>Price Alert ↓ — {symbol}</b>\n\n"
                 f"Price crossed below <b>${PRICE_ALERT_LOW:,.2f}</b>\n"
-                f"Current: <b>${price:,.2f}</b>"
+                f"Current: <b>${price:,.2f}</b>\n"
+                f"<i>💡 Pre-set price level crossed — the level you were watching has been reached.</i>"
             )
             send_telegram_message(msg)
             log_signal(symbol, "price_alert_low", price, rsi)
             state["price_alert_low_fired"] = True
+
+    # Feature 2 & 3 — Key levels, regime, risk & volatility checks
+    try:
+        check_key_levels_regime(symbol, df, state)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        check_risk_volatility(symbol, df, state)
+    except Exception:  # noqa: BLE001
+        pass
 
     state["last_price"] = price
 
@@ -1193,6 +1794,18 @@ def _make_symbol_state() -> dict:
         "ath_proximity_in_zone": False,
         "price_alert_high_fired": False,
         "price_alert_low_fired": False,
+        # Feature 2 — Key Levels & Regime
+        "last_regime": None,
+        "last_regime_alert": None,
+        "last_key_level_break_alert": None,
+        "last_swing_high": None,
+        "last_swing_low": None,
+        # Feature 3 — Risk & Volatility
+        "last_bb_width": None,
+        "last_vol_alert": None,
+        "last_drawdown_alert": {},  # {threshold_float: last_alert_datetime}
+        "rolling_high": None,
+        "last_risk_off_alert": None,
     }
 
 
@@ -1336,6 +1949,79 @@ def main() -> None:
                         logger.error("[%s] Failed to send daily summary: %s", symbol, exc)
                 state["signals_counter"] = {t: 0 for t in _SIGNAL_TYPES}
             last_heartbeat = now
+
+        # Advisor briefs (Feature 1)
+        _weekday_map = {"Mon": 0, "Tue": 1, "Wed": 2, "Thu": 3, "Fri": 4, "Sat": 5, "Sun": 6}
+        if ADVISOR_BRIEF_ENABLED:
+            today = now.date()
+            if now.hour == ADVISOR_BRIEF_HOUR_UTC:
+                for symbol in SYMBOLS:
+                    if (
+                        _last_advisor_brief_date.get(symbol) != today
+                        and symbol_states[symbol]["last_df"] is not None
+                    ):
+                        try:
+                            send_advisor_brief(symbol, symbol_states[symbol]["last_df"], symbol_states[symbol])
+                            _last_advisor_brief_date[symbol] = today
+                        except Exception:  # noqa: BLE001
+                            pass
+
+        if WEEKLY_BRIEF_ENABLED:
+            today = now.date()
+            if now.weekday() == _weekday_map.get(WEEKLY_BRIEF_WEEKDAY, 0) and now.hour == ADVISOR_BRIEF_HOUR_UTC:
+                for symbol in SYMBOLS:
+                    if (
+                        _last_weekly_brief_date.get(symbol) != today
+                        and symbol_states[symbol]["last_df"] is not None
+                    ):
+                        try:
+                            send_advisor_brief(symbol, symbol_states[symbol]["last_df"], symbol_states[symbol])
+                            _last_weekly_brief_date[symbol] = today
+                        except Exception:  # noqa: BLE001
+                            pass
+
+        # DCA Reminder (Feature 6)
+        global _last_dca_reminder_date, _last_risk_tip_date, _risk_tip_index
+        if DCA_REMINDER_ENABLED:
+            today = now.date()
+            if (
+                now.weekday() == _weekday_map.get(DCA_REMINDER_WEEKDAY, 0)
+                and now.hour == DCA_REMINDER_HOUR_UTC
+                and _last_dca_reminder_date != today
+            ):
+                try:
+                    send_telegram_message(
+                        "📅 <b>DCA Reminder</b>\n\nToday is your configured DCA day. "
+                        "Consider placing a regular, scheduled purchase regardless of current price action.\n\n"
+                        "<i>ℹ️ This is a reminder, not financial advice.</i>"
+                    )
+                    _last_dca_reminder_date = today
+                except Exception:  # noqa: BLE001
+                    pass
+
+        # Risk Tip (Feature 6)
+        if RISK_TIP_ENABLED:
+            today = now.date()
+            if (
+                now.weekday() == _weekday_map.get(RISK_TIP_WEEKDAY, 0)
+                and now.hour == RISK_TIP_HOUR_UTC
+                and _last_risk_tip_date != today
+            ):
+                try:
+                    send_telegram_message(
+                        _RISK_TIPS[_risk_tip_index % len(_RISK_TIPS)]
+                        + "\n\n<i>ℹ️ Educational reminder. Not financial advice.</i>"
+                    )
+                    _last_risk_tip_date = today
+                    _risk_tip_index += 1
+                except Exception:  # noqa: BLE001
+                    pass
+
+        # Macro event reminders (Feature 5)
+        try:
+            check_macro_reminders()
+        except Exception:  # noqa: BLE001
+            pass
 
         _shutdown.wait(timeout=POLL_INTERVAL_SECONDS)
 
