@@ -39,7 +39,7 @@ Required environment variables:
 
 Optional environment variables (all have sensible defaults):
   EXCHANGE                 — ccxt exchange ID (default: binance)
-  SYMBOLS                  — comma-separated pairs (default: BTC/USDT)
+  SYMBOLS                  — comma-separated pairs (default: BTC/USDT,SOL/USDT)
   TIMEFRAME                — OHLCV candle size (default: 1h)
   CONFIRM_TIMEFRAME        — second timeframe for confirmation (default: disabled)
   SMA_PERIOD               — Simple Moving Average period (default: 200)
@@ -102,7 +102,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 EXCHANGE_ID: str = "binance"
-SYMBOLS: list[str] = ["BTC/USDT"]
+SYMBOLS: list[str] = ["BTC/USDT", "SOL/USDT"]
 TIMEFRAME: str = "1h"
 CONFIRM_TIMEFRAME: str = ""           # e.g. "4h"; empty = disabled
 SMA_PERIOD: int = 200
