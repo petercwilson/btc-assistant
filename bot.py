@@ -167,6 +167,12 @@ RISK_TIP_HOUR_UTC: int = 10
 # Feature 7 — Signal History
 SIGNAL_HISTORY_LOOKBACK: int = 200
 
+# Offsets used in advisor brief "what would change my view" bullets.
+# RSI_RECOVERY_MARGIN: how far RSI must recover from buy_threshold to show neutral recovery.
+# RSI_NEUTRAL_MARGIN: band around thresholds used to define the neutral-posture watch zone.
+_RSI_RECOVERY_MARGIN: int = 20
+_RSI_NEUTRAL_MARGIN: int = 5
+
 # ---------------------------------------------------------------------------
 # Shutdown event — set by SIGTERM or KeyboardInterrupt
 # ---------------------------------------------------------------------------
@@ -1230,11 +1236,11 @@ def send_advisor_brief(symbol: str, df: pd.DataFrame, state: dict) -> None:
     elif price < sma or rsi > RSI_SELL_THRESHOLD:
         posture = "Conservative 🔴"
         posture_note = "Price or momentum conditions are unfavorable. Reduce exposure."
-        change_view = f"A sustained close above SMA{SMA_PERIOD} with RSI recovering below {RSI_BUY_THRESHOLD + 20:.0f} would shift bias to Neutral."
+        change_view = f"A sustained close above SMA{SMA_PERIOD} with RSI recovering below {RSI_BUY_THRESHOLD + _RSI_RECOVERY_MARGIN:.0f} would shift bias to Neutral."
     else:
         posture = "Neutral 🟡"
         posture_note = "No clear directional edge. Watch for confirmation."
-        change_view = f"Watch for RSI breaking below {RSI_BUY_THRESHOLD + 5:.0f} (bullish) or above {RSI_SELL_THRESHOLD - 5:.0f} (bearish) to define next posture."
+        change_view = f"Watch for RSI breaking below {RSI_BUY_THRESHOLD + _RSI_NEUTRAL_MARGIN:.0f} (bullish) or above {RSI_SELL_THRESHOLD - _RSI_NEUTRAL_MARGIN:.0f} (bearish) to define next posture."
 
     swing_high_str = f"${swing_high:,.2f}" if swing_high else "N/A"
     swing_low_str = f"${swing_low:,.2f}" if swing_low else "N/A"

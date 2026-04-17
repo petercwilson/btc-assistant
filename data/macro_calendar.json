@@ -1,50 +1,80 @@
 [
   {
-    "id": "fomc-2025-01",
+    "id": "fomc-2026-04",
     "title": "FOMC Meeting",
-    "utc": "2025-01-29T19:00:00Z",
-    "note": "Federal Reserve interest rate decision. High macro volatility risk."
+    "utc": "2026-04-29T18:00:00Z",
+    "note": "Federal Reserve interest rate decision. High macro volatility risk for risk assets."
   },
   {
-    "id": "fomc-2025-03",
+    "id": "fomc-2026-06",
     "title": "FOMC Meeting",
-    "utc": "2025-03-19T18:00:00Z",
-    "note": "Federal Reserve interest rate decision. High macro volatility risk."
+    "utc": "2026-06-17T18:00:00Z",
+    "note": "Federal Reserve interest rate decision. High macro volatility risk for risk assets."
   },
   {
-    "id": "fomc-2025-05",
+    "id": "fomc-2026-07",
     "title": "FOMC Meeting",
-    "utc": "2025-05-07T18:00:00Z",
-    "note": "Federal Reserve interest rate decision. High macro volatility risk."
+    "utc": "2026-07-29T18:00:00Z",
+    "note": "Federal Reserve interest rate decision. High macro volatility risk for risk assets."
   },
   {
-    "id": "us-cpi-2025-02",
-    "title": "US CPI Inflation Data (Feb)",
-    "utc": "2025-02-12T13:30:00Z",
+    "id": "fomc-2026-09",
+    "title": "FOMC Meeting",
+    "utc": "2026-09-16T18:00:00Z",
+    "note": "Federal Reserve interest rate decision. High macro volatility risk for risk assets."
+  },
+  {
+    "id": "fomc-2026-11",
+    "title": "FOMC Meeting",
+    "utc": "2026-11-04T19:00:00Z",
+    "note": "Federal Reserve interest rate decision. High macro volatility risk for risk assets."
+  },
+  {
+    "id": "fomc-2026-12",
+    "title": "FOMC Meeting",
+    "utc": "2026-12-16T19:00:00Z",
+    "note": "Federal Reserve interest rate decision. High macro volatility risk for risk assets."
+  },
+  {
+    "id": "us-cpi-2026-04",
+    "title": "US CPI Inflation Data (Apr 2026)",
+    "utc": "2026-04-10T12:30:00Z",
     "note": "US Consumer Price Index release. Unexpected readings can cause sharp moves in risk assets."
   },
   {
-    "id": "us-cpi-2025-03",
-    "title": "US CPI Inflation Data (Mar)",
-    "utc": "2025-03-12T12:30:00Z",
+    "id": "us-cpi-2026-05",
+    "title": "US CPI Inflation Data (May 2026)",
+    "utc": "2026-05-13T12:30:00Z",
     "note": "US Consumer Price Index release. Unexpected readings can cause sharp moves in risk assets."
   },
   {
-    "id": "us-nonfarm-2025-02",
-    "title": "US Non-Farm Payrolls (Feb)",
-    "utc": "2025-02-07T13:30:00Z",
+    "id": "us-cpi-2026-06",
+    "title": "US CPI Inflation Data (Jun 2026)",
+    "utc": "2026-06-10T12:30:00Z",
+    "note": "US Consumer Price Index release. Unexpected readings can cause sharp moves in risk assets."
+  },
+  {
+    "id": "us-nonfarm-2026-05",
+    "title": "US Non-Farm Payrolls (May 2026)",
+    "utc": "2026-05-01T12:30:00Z",
     "note": "US jobs report. Strong or weak data can drive risk-on or risk-off sentiment."
   },
   {
-    "id": "us-nonfarm-2025-03",
-    "title": "US Non-Farm Payrolls (Mar)",
-    "utc": "2025-03-07T13:30:00Z",
+    "id": "us-nonfarm-2026-06",
+    "title": "US Non-Farm Payrolls (Jun 2026)",
+    "utc": "2026-06-05T12:30:00Z",
     "note": "US jobs report. Strong or weak data can drive risk-on or risk-off sentiment."
+  },
+  {
+    "id": "us-gdp-q1-2026",
+    "title": "US GDP Q1 2026 (Advance Estimate)",
+    "utc": "2026-04-30T12:30:00Z",
+    "note": "First GDP estimate for Q1 2026. Growth/contraction surprise can move risk assets."
   },
   {
     "id": "btc-halving-2028",
     "title": "Bitcoin Halving (estimated)",
     "utc": "2028-04-15T00:00:00Z",
-    "note": "Bitcoin block reward halves. Historically associated with major bull cycles."
+    "note": "Bitcoin block reward halves approximately every 4 years. Historically associated with major bull cycles."
   }
 ]
