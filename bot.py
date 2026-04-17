@@ -38,7 +38,7 @@ Required environment variables:
   TELEGRAM_CHAT_ID   — comma-separated chat ID(s)
 
 Optional environment variables (all have sensible defaults):
-  EXCHANGE                 — ccxt exchange ID (default: binance)
+    EXCHANGE                 — ccxt exchange ID (default: coinbase)
   SYMBOLS                  — comma-separated pairs (default: BTC/USDT,SOL/USDT)
   TIMEFRAME                — OHLCV candle size (default: 1h)
   CONFIRM_TIMEFRAME        — second timeframe for confirmation (default: disabled)
@@ -101,7 +101,7 @@ logger = logging.getLogger(__name__)
 # Configuration defaults (overridden by _load_config)
 # ---------------------------------------------------------------------------
 
-EXCHANGE_ID: str = "binance"
+EXCHANGE_ID: str = "coinbase"
 SYMBOLS: list[str] = ["BTC/USDT", "SOL/USDT"]
 TIMEFRAME: str = "1h"
 CONFIRM_TIMEFRAME: str = ""           # e.g. "4h"; empty = disabled
@@ -1281,6 +1281,12 @@ def main() -> None:
                 logger.error("[%s] Telegram request failed: %s", symbol, exc)
             except ccxt.NetworkError as exc:
                 logger.error("[%s] Exchange network error: %s", symbol, exc)
+                err_text = str(exc).lower()
+                if EXCHANGE_ID == "binance" and ("restricted location" in err_text or " 451 " in err_text):
+                    logger.error(
+                        "[%s] Binance is restricted in this region. Set EXCHANGE=coinbase or EXCHANGE=kraken in .env.",
+                        symbol,
+                    )
                 state["consecutive_errors"] += 1
                 if _prom_errors is not None:
                     try:
