@@ -1189,7 +1189,7 @@ def send_advisor_brief(symbol: str, df: pd.DataFrame, state: dict) -> None:
             slope_label = "rising" if s_pct > 0.2 else ("falling" if s_pct < -0.2 else "flat")
 
     # Momentum
-    rsi_label = "oversold" if rsi < 35 else ("overbought" if rsi > 65 else "neutral")
+    rsi_label = "oversold" if rsi < RSI_BUY_THRESHOLD else ("overbought" if rsi > RSI_SELL_THRESHOLD else "neutral")
     macd_dir = "positive" if not pd.isna(macd_hist) and macd_hist > 0 else "negative"
 
     # Volatility
@@ -1226,15 +1226,15 @@ def send_advisor_brief(symbol: str, df: pd.DataFrame, state: dict) -> None:
     if price > sma and rsi < 50 and regime == "trend_up":
         posture = "Aggressive 🟢"
         posture_note = "Trend and momentum aligned to the upside. Acceptable risk window."
-        change_view = f"A close below SMA{SMA_PERIOD} or RSI rising above 65 would shift bias to Neutral/Conservative."
-    elif price < sma or rsi > 65:
+        change_view = f"A close below SMA{SMA_PERIOD} or RSI rising above {RSI_SELL_THRESHOLD} would shift bias to Neutral/Conservative."
+    elif price < sma or rsi > RSI_SELL_THRESHOLD:
         posture = "Conservative 🔴"
         posture_note = "Price or momentum conditions are unfavorable. Reduce exposure."
-        change_view = f"A sustained close above SMA{SMA_PERIOD} with RSI recovering below 55 would shift bias to Neutral."
+        change_view = f"A sustained close above SMA{SMA_PERIOD} with RSI recovering below {RSI_BUY_THRESHOLD + 20:.0f} would shift bias to Neutral."
     else:
         posture = "Neutral 🟡"
         posture_note = "No clear directional edge. Watch for confirmation."
-        change_view = "Watch for RSI breaking below 40 (bullish) or above 65 (bearish) to define next posture."
+        change_view = f"Watch for RSI breaking below {RSI_BUY_THRESHOLD + 5:.0f} (bullish) or above {RSI_SELL_THRESHOLD - 5:.0f} (bearish) to define next posture."
 
     swing_high_str = f"${swing_high:,.2f}" if swing_high else "N/A"
     swing_low_str = f"${swing_low:,.2f}" if swing_low else "N/A"
