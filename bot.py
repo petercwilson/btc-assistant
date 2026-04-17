@@ -3,14 +3,25 @@ BTC/USDT Signal Bot
 Monitors BTC/USDT price action on Binance and sends Telegram alerts for trading signals.
 
 Signals:
-  BUY  🟢 — Price > 200-period SMA AND RSI < 35
-  SELL 🔴 — RSI > 70
+  BUY  🟢 — Price > SMA(SMA_PERIOD) AND RSI < RSI_BUY_THRESHOLD
+  SELL 🔴 — RSI > RSI_SELL_THRESHOLD
 
-A heartbeat "System Active" message is sent every 24 hours.
+A daily summary message is sent every HEARTBEAT_INTERVAL_HOURS hours with the current
+price, RSI, distance to the SMA, and the number of signals fired during that period.
 
 Required environment variables:
   TELEGRAM_BOT_TOKEN — token from @BotFather
   TELEGRAM_CHAT_ID   — your Telegram chat ID (see README for instructions)
+
+Optional environment variables (all have sensible defaults):
+  TIMEFRAME                — OHLCV candle size, e.g. "1h" (default: 1h)
+  SMA_PERIOD               — periods for the Simple Moving Average (default: 200)
+  RSI_PERIOD               — periods for RSI calculation (default: 14)
+  RSI_BUY_THRESHOLD        — RSI level below which a BUY signal fires (default: 35)
+  RSI_SELL_THRESHOLD       — RSI level above which a SELL signal fires (default: 70)
+  POLL_INTERVAL_SECONDS    — seconds between each data fetch (default: 60)
+  HEARTBEAT_INTERVAL_HOURS — hours between daily summary messages (default: 24)
+  SIGNAL_COOLDOWN_HOURS    — minimum hours between repeated same-type alerts (default: 4)
 """
 
 import os
@@ -37,11 +48,46 @@ SYMBOL = "BTC/USDT"
 TIMEFRAME = "1h"
 SMA_PERIOD = 200
 RSI_PERIOD = 14
+RSI_BUY_THRESHOLD: float = 35.0   # RSI below this triggers a BUY signal
+RSI_SELL_THRESHOLD: float = 70.0  # RSI above this triggers a SELL signal
 POLL_INTERVAL_SECONDS = 60
 HEARTBEAT_INTERVAL_HOURS = 24
 SIGNAL_COOLDOWN_HOURS = 4   # minimum gap between repeated alerts for the same signal type
 TELEGRAM_MAX_RETRIES = 3    # number of attempts before giving up on a Telegram send
 RSI_EPSILON = 1e-10         # minimum avg_loss to avoid division by zero in RSI calculation
+
+# ---------------------------------------------------------------------------
+# Runtime configuration loader
+# ---------------------------------------------------------------------------
+
+
+def _load_config() -> None:
+    """Override module-level constants from environment variables.
+
+    Called in ``main()`` after ``load_dotenv()`` so the ``.env`` file has
+    already been applied.  All parameters have defaults matching the values
+    defined above, so the bot runs out-of-the-box without any extra variables.
+    """
+    global SMA_PERIOD, RSI_PERIOD, TIMEFRAME, POLL_INTERVAL_SECONDS
+    global HEARTBEAT_INTERVAL_HOURS, SIGNAL_COOLDOWN_HOURS
+    global RSI_BUY_THRESHOLD, RSI_SELL_THRESHOLD
+
+    TIMEFRAME = os.environ.get("TIMEFRAME", TIMEFRAME)
+    SMA_PERIOD = int(os.environ.get("SMA_PERIOD", SMA_PERIOD))
+    RSI_PERIOD = int(os.environ.get("RSI_PERIOD", RSI_PERIOD))
+    RSI_BUY_THRESHOLD = float(os.environ.get("RSI_BUY_THRESHOLD", RSI_BUY_THRESHOLD))
+    RSI_SELL_THRESHOLD = float(os.environ.get("RSI_SELL_THRESHOLD", RSI_SELL_THRESHOLD))
+    POLL_INTERVAL_SECONDS = int(os.environ.get("POLL_INTERVAL_SECONDS", POLL_INTERVAL_SECONDS))
+    HEARTBEAT_INTERVAL_HOURS = int(os.environ.get("HEARTBEAT_INTERVAL_HOURS", HEARTBEAT_INTERVAL_HOURS))
+    SIGNAL_COOLDOWN_HOURS = int(os.environ.get("SIGNAL_COOLDOWN_HOURS", SIGNAL_COOLDOWN_HOURS))
+
+    logger.info(
+        "Config: TIMEFRAME=%s SMA_PERIOD=%d RSI_PERIOD=%d "
+        "RSI_BUY=%.1f RSI_SELL=%.1f POLL=%ds HEARTBEAT=%dh COOLDOWN=%dh",
+        TIMEFRAME, SMA_PERIOD, RSI_PERIOD,
+        RSI_BUY_THRESHOLD, RSI_SELL_THRESHOLD,
+        POLL_INTERVAL_SECONDS, HEARTBEAT_INTERVAL_HOURS, SIGNAL_COOLDOWN_HOURS,
+    )
 
 # ---------------------------------------------------------------------------
 # Telegram helpers
@@ -122,8 +168,8 @@ def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """Add SMA and RSI columns to the OHLCV DataFrame."""
     df = df.copy()
 
-    # 200-period Simple Moving Average
-    df["sma200"] = df["close"].rolling(window=SMA_PERIOD).mean()
+    # Simple Moving Average (configurable period)
+    df["sma"] = df["close"].rolling(window=SMA_PERIOD).mean()
 
     # 14-period RSI (Wilder / EMA smoothing via pandas ewm)
     delta = df["close"].diff()
@@ -147,41 +193,46 @@ def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
 def check_and_notify(
     df: pd.DataFrame,
     last_signal: dict[str, datetime | None],
+    signals_counter: dict[str, int],
 ) -> None:
     """Evaluate the latest candle and send a Telegram alert if a signal fires.
 
     ``last_signal`` is a mutable dict with keys ``"buy"`` and ``"sell"`` mapping
     to the ``datetime`` of the most recent alert of each type (or ``None``).
     Alerts for the same signal type are suppressed within ``SIGNAL_COOLDOWN_HOURS``.
+
+    ``signals_counter`` is a mutable dict with keys ``"buy"`` and ``"sell"``
+    counting how many alerts of each type have fired since the last heartbeat.
     """
     latest = df.iloc[-1]
     price: float = latest["close"]
-    sma200: float = latest["sma200"]
+    sma: float = latest["sma"]
     rsi: float = latest["rsi"]
 
-    if pd.isna(sma200) or pd.isna(rsi):
+    if pd.isna(sma) or pd.isna(rsi):
         logger.warning("Not enough data to calculate indicators yet.")
         return
 
-    logger.info("Price: %.2f | SMA200: %.2f | RSI: %.2f", price, sma200, rsi)
+    logger.info("Price: %.2f | SMA%d: %.2f | RSI: %.2f", price, SMA_PERIOD, sma, rsi)
     now = datetime.now(UTC)
     cooldown = timedelta(hours=SIGNAL_COOLDOWN_HOURS)
 
-    if price > sma200 and rsi < 35:
+    if price > sma and rsi < RSI_BUY_THRESHOLD:
         if last_signal["buy"] is None or now - last_signal["buy"] >= cooldown:
             message = (
                 "🟢 <b>BUY SIGNAL</b>\n\n"
-                f"Price:   <b>${price:,.2f}</b>\n"
-                f"RSI:     <b>{rsi:.2f}</b>\n"
-                f"200 SMA: <b>${sma200:,.2f}</b>"
+                f"Price:    <b>${price:,.2f}</b>\n"
+                f"RSI:      <b>{rsi:.2f}</b>\n"
+                f"SMA{SMA_PERIOD}: <b>${sma:,.2f}</b>"
             )
             send_telegram_message(message)
             last_signal["buy"] = now
+            signals_counter["buy"] += 1
 
     # The SELL signal deliberately omits a trend filter: RSI overbought
     # conditions are actionable regardless of whether price is above or below
-    # the 200 SMA, since extreme readings in either trend direction carry risk.
-    elif rsi > 70:
+    # the SMA, since extreme readings in either trend direction carry risk.
+    elif rsi > RSI_SELL_THRESHOLD:
         if last_signal["sell"] is None or now - last_signal["sell"] >= cooldown:
             message = (
                 "🔴 <b>SELL SIGNAL</b>\n\n"
@@ -190,6 +241,45 @@ def check_and_notify(
             )
             send_telegram_message(message)
             last_signal["sell"] = now
+            signals_counter["sell"] += 1
+
+
+# ---------------------------------------------------------------------------
+# Daily summary
+# ---------------------------------------------------------------------------
+
+
+def send_daily_summary(df: pd.DataFrame, signals_counter: dict[str, int]) -> None:
+    """Send an enriched heartbeat with the latest market snapshot and signal counts.
+
+    Replaces the plain "System Active" message with the current price, RSI,
+    the percentage distance from the SMA, and how many buy/sell alerts fired
+    during the preceding heartbeat period.
+    """
+    latest = df.iloc[-1]
+    price: float = latest["close"]
+    sma: float = latest["sma"]
+    rsi: float = latest["rsi"]
+
+    rsi_str = f"{rsi:.2f}" if not pd.isna(rsi) else "N/A"
+
+    if not pd.isna(sma):
+        pct = (price - sma) / sma * 100
+        direction = "above" if pct >= 0 else "below"
+        sma_str = f"<b>${sma:,.2f}</b> ({direction} by {abs(pct):.1f}%)"
+    else:
+        sma_str = "N/A"
+
+    message = (
+        "✅ <b>Daily Summary</b>\n\n"
+        f"Price:   <b>${price:,.2f}</b>\n"
+        f"RSI:     <b>{rsi_str}</b>\n"
+        f"SMA{SMA_PERIOD}:  {sma_str}\n\n"
+        f"Signals (last {HEARTBEAT_INTERVAL_HOURS}h):\n"
+        f"  🟢 Buy:  {signals_counter['buy']}\n"
+        f"  🔴 Sell: {signals_counter['sell']}"
+    )
+    send_telegram_message(message)
 
 
 # ---------------------------------------------------------------------------
@@ -199,6 +289,7 @@ def check_and_notify(
 
 def main() -> None:
     load_dotenv()  # load .env file if present (no-op when env vars are already set)
+    _load_config()  # apply env-variable overrides for all tuneable parameters
 
     missing = [v for v in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID") if not os.environ.get(v)]
     if missing:
@@ -211,21 +302,29 @@ def main() -> None:
     send_telegram_message("🤖 <b>BTC/USDT Signal Bot started</b>")
 
     exchange = ccxt.binance()
-    last_heartbeat = datetime.now(UTC)  # first heartbeat fires after 24 h; startup message serves as immediate confirmation
+    last_heartbeat = datetime.now(UTC)  # first heartbeat fires after HEARTBEAT_INTERVAL_HOURS
     last_signal: dict[str, datetime | None] = {"buy": None, "sell": None}
+    signals_counter: dict[str, int] = {"buy": 0, "sell": 0}
+    last_df: pd.DataFrame | None = None
 
     while True:
         try:
-            # Heartbeat
-            now = datetime.now(UTC)
-            if now - last_heartbeat >= timedelta(hours=HEARTBEAT_INTERVAL_HOURS):
-                send_telegram_message("✅ <b>System Active</b>")
-                last_heartbeat = now
-
-            # Fetch data and check signals
+            # Fetch data first so the heartbeat can include the latest snapshot
             df = fetch_ohlcv(exchange)
             df = calculate_indicators(df)
-            check_and_notify(df, last_signal)
+            last_df = df
+
+            # Heartbeat / daily summary
+            now = datetime.now(UTC)
+            if now - last_heartbeat >= timedelta(hours=HEARTBEAT_INTERVAL_HOURS):
+                if last_df is not None:
+                    send_daily_summary(last_df, signals_counter)
+                else:
+                    send_telegram_message("✅ <b>System Active</b>")
+                signals_counter = {"buy": 0, "sell": 0}
+                last_heartbeat = now
+
+            check_and_notify(df, last_signal, signals_counter)
 
         except requests.exceptions.RequestException as exc:
             logger.error("Telegram request failed: %s", exc)

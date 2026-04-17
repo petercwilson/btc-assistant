@@ -8,11 +8,11 @@ A lightweight Python signal bot that monitors BTC/USDT price action on Binance a
 
 | Signal | Condition |
 |---|---|
-| 🟢 **BUY SIGNAL** | Price > 200-period SMA **AND** RSI < 35 |
-| 🔴 **SELL SIGNAL** | RSI > 70 |
+| 🟢 **BUY SIGNAL** | Price > SMA(`SMA_PERIOD`) **AND** RSI < `RSI_BUY_THRESHOLD` (default 35) |
+| 🔴 **SELL SIGNAL** | RSI > `RSI_SELL_THRESHOLD` (default 70) |
 
-Each alert includes the current price, RSI value, and (for buy signals) the 200 SMA.  
-A ✅ **System Active** heartbeat message is sent every 24 hours so you know the bot is still running.
+Each alert includes the current price, RSI value, and (for buy signals) the SMA.  
+A ✅ **Daily Summary** message is sent every `HEARTBEAT_INTERVAL_HOURS` hours (default 24h) with the current price, RSI, distance from the SMA, and the number of signals fired during that period.
 
 ---
 
@@ -90,10 +90,18 @@ The bot will:
 
 ## Configuration reference
 
-| Variable | Description |
-|---|---|
-| `TELEGRAM_BOT_TOKEN` | Token from @BotFather |
-| `TELEGRAM_CHAT_ID` | Your numeric Telegram chat ID |
+| Variable | Default | Description |
+|---|---|---|
+| `TELEGRAM_BOT_TOKEN` | *(required)* | Token from @BotFather |
+| `TELEGRAM_CHAT_ID` | *(required)* | Your numeric Telegram chat ID |
+| `TIMEFRAME` | `1h` | OHLCV candle size (e.g. `4h`, `1d`) |
+| `SMA_PERIOD` | `200` | Simple Moving Average period |
+| `RSI_PERIOD` | `14` | RSI calculation period |
+| `RSI_BUY_THRESHOLD` | `35` | RSI below this value triggers a BUY signal |
+| `RSI_SELL_THRESHOLD` | `70` | RSI above this value triggers a SELL signal |
+| `POLL_INTERVAL_SECONDS` | `60` | Seconds between each data fetch |
+| `HEARTBEAT_INTERVAL_HOURS` | `24` | Hours between daily summary messages |
+| `SIGNAL_COOLDOWN_HOURS` | `4` | Minimum hours between repeated same-type alerts |
 
 ---
 
