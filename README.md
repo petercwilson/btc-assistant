@@ -146,7 +146,7 @@ To expose the Prometheus `/metrics` endpoint, uncomment the `ports` section in
 | `TELEGRAM_BOT_TOKEN` | *(required)* | Token from @BotFather |
 | `TELEGRAM_CHAT_ID` | *(required)* | Comma-separated Telegram chat ID(s) |
 | `EXCHANGE` | `binance` | ccxt exchange ID (e.g. `kraken`, `coinbase`) |
-| `SYMBOLS` | `BTC/USDT` | Comma-separated trading pairs |
+| `SYMBOLS` | `BTC/USDT,SOL/USDT` | Comma-separated trading pairs |
 | `TIMEFRAME` | `1h` | OHLCV candle size (e.g. `4h`, `1d`) |
 | `CONFIRM_TIMEFRAME` | *(disabled)* | Second timeframe for signal confirmation |
 | `SMA_PERIOD` | `200` | Simple Moving Average period |
