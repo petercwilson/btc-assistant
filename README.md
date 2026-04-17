@@ -42,6 +42,22 @@ Signal messages also include **Snooze 1h / Snooze 4h** inline buttons to tempora
 
 ---
 
+## Advisor Brief (Telegram-only, read-only)
+
+You can optionally enable a daily/weekly "advisor-style" market brief message.
+
+- It is still **read-only** (no orders).
+- It does **not** store user profiles.
+
+Environment variables:
+
+- `ADVISOR_BRIEF_ENABLED` — `true`/`false` (default: `false`)
+- `ADVISOR_BRIEF_HOUR_UTC` — hour of day in UTC (`0`-`23`, default: `13`)
+- `WEEKLY_BRIEF_ENABLED` — `true`/`false` (default: `false`)
+- `WEEKLY_BRIEF_WEEKDAY` — `Mon`, `Tue`, `Wed`, `Thu`, `Fri`, `Sat`, `Sun` (default: `Mon`)
+
+---
+
 ## Requirements
 
 - Python 3.9+
@@ -58,9 +74,9 @@ Signal messages also include **Snooze 1h / Snooze 4h** inline buttons to tempora
 2. Start a chat and send `/newbot`.
 3. Follow the prompts — choose a name and a username (must end in `bot`).
 4. BotFather will reply with a token like:
-   ```
+   ````
    123456789:ABCdefGhIJKlmNoPQRsTUVwxYZ
-   ```
+   ````
 
 ### 2 — Find your Telegram Chat ID
 
